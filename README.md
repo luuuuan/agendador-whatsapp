@@ -1,20 +1,23 @@
 # Agendador de WhatsApp
 
 Agenda mensagens de texto e fotos pra contatos ou grupos, com repetição diária, semanal ou mensal.
+Tem login e cadastro: **cada conta conecta o próprio WhatsApp** e só vê os próprios agendamentos.
 
-- **Render (free):** roda o servidor (Node + Baileys), conectado no seu WhatsApp como um "WhatsApp Web".
-- **Supabase:** guarda os agendamentos, as fotos (Storage) e a sessão do WhatsApp. Assim, quando o Render reinicia, não precisa escanear o QR de novo.
+- **Render (free):** roda o servidor (Node + Baileys), com uma conexão "WhatsApp Web" por conta.
+- **Supabase:** guarda as contas, os agendamentos, as fotos (Storage) e as sessões do WhatsApp. Assim, quando o Render reinicia, ninguém precisa escanear o QR de novo.
 - **UptimeRobot:** dá um ping a cada 5 min pra o Render não dormir.
 
 ## 1. Supabase
 
 1. Crie um projeto em supabase.com.
 2. Vá em **SQL Editor → New query**, cole o conteúdo de `supabase.sql` e clique em **Run**. Isso cria as tabelas e o bucket `fotos`.
-3. Em **Project Settings → API**, copie:
-   - **Project URL** → `SUPABASE_URL`
-   - **service_role** (secret) → `SUPABASE_SERVICE_ROLE_KEY`
+3. Copie:
+   - **Project Settings → Data API → Project URL** → `SUPABASE_URL` (só `https://xxxx.supabase.co`, sem nada no final)
+   - **Project Settings → API Keys → secret key** (`sb_secret_...`) → `SUPABASE_SERVICE_ROLE_KEY`
 
-> A service_role key dá acesso total ao banco. Ela só fica no Render; nunca coloque no código nem no GitHub.
+> A secret key dá acesso total ao banco. Ela só fica no Render; nunca coloque no código nem no GitHub.
+
+**Já tinha o banco de uma versão anterior?** Em vez do `supabase.sql`, rode só as migrações que ainda não rodou, nesta ordem: `migracao-termina-em.sql`, `migracao-lote.sql`, `migracao-usuarios.sql`.
 
 ## 2. GitHub
 
@@ -45,18 +48,22 @@ As 750h grátis por mês são **por workspace**. Se este serviço ficar no mesmo
 | Variável | Valor |
 |---|---|
 | `SUPABASE_URL` | URL do projeto |
-| `SUPABASE_SERVICE_ROLE_KEY` | service_role key |
-| `PAINEL_USUARIO` | ex.: `nicole` |
-| `PAINEL_SENHA` | uma senha forte |
+| `SUPABASE_SERVICE_ROLE_KEY` | secret key (`sb_secret_...`) |
+| `CODIGO_CONVITE` | um código que só você passa pra quem pode criar conta (recomendado) |
 | `TZ` | `America/Sao_Paulo` |
+
+Sem `CODIGO_CONVITE`, **qualquer pessoa** que achar o link consegue criar conta e usar o seu servidor. Com ele, a tela de cadastro pede o código.
 
 5. Faça o deploy e espere aparecer `Servidor na porta ...` nos logs.
 
-## 4. Conectar o WhatsApp
+## 4. Criar a conta e conectar o WhatsApp
 
-1. Abra `https://SEU-APP.onrender.com/qr` e entre com o usuário e a senha do painel.
-2. No celular: **Configurações → Dispositivos conectados → Conectar dispositivo** e escaneie o código.
-3. Quando aparecer "✅ WhatsApp conectado", é só abrir `https://SEU-APP.onrender.com` e usar o painel.
+1. Abra `https://SEU-APP.onrender.com` → **Criar conta** (com o código de convite, se configurou).
+2. Depois do tour, abre a janela **Seu WhatsApp** → **Gerar QR code**.
+3. No celular: **Configurações → Dispositivos conectados → Conectar dispositivo** e escaneie o código (ele vale por cerca de 1 minuto).
+4. Quando aparecer "✅ WhatsApp conectado", está pronto. O selo no topo do painel mostra o status e abre essa janela a qualquer momento.
+
+A **primeira conta criada** herda os agendamentos que existiam antes do login. Cada pessoa nova faz o mesmo: cria a conta e lê o QR com o próprio celular.
 
 ## 5. UptimeRobot
 
@@ -65,7 +72,7 @@ As 750h grátis por mês são **por workspace**. Se este serviço ficar no mesmo
    - **Type:** HTTP(s)
    - **URL:** `https://SEU-APP.onrender.com/health`
    - **Interval:** 5 minutos
-3. Pronto. O `/health` não pede senha, justamente pra o ping funcionar.
+3. Pronto. O `/health` não pede login, justamente pra o ping funcionar.
 
 ## Como usar o painel
 
@@ -95,9 +102,11 @@ npm install
 npm run dev
 ```
 
-Abra http://localhost:3000. Atenção: se rodar local e no Render ao mesmo tempo, os dois vão disputar a mesma sessão. Use um de cada vez.
+Abra http://localhost:3000. Atenção: se rodar local e no Render ao mesmo tempo apontando pro mesmo Supabase, os dois vão disputar as mesmas sessões do WhatsApp. Use um de cada vez.
 
 ## Cuidados
 
 - O Baileys é uma biblioteca **não oficial**. Pra uso pessoal, com poucas mensagens pra quem você conhece, o risco é baixo. Não use pra disparo em massa, porque o número pode ser banido.
-- Pra desconectar, remova o dispositivo "Agendador" em **Dispositivos conectados** no celular. O servidor percebe, limpa a sessão e gera um QR novo.
+- Pra desconectar, use **Desconectar este número** na janela "Seu WhatsApp", ou remova o dispositivo "Agendador" no celular.
+- **Quantos números cabem:** cada WhatsApp conectado usa uns 50–100 MB de memória, e o Render free tem 512 MB. Na prática, 3 a 5 contas conectadas ao mesmo tempo. Mais que isso, precisa do plano pago.
+- Login: a sessão dura 30 dias. Depois de 8 senhas erradas, o e-mail fica bloqueado por 15 minutos.

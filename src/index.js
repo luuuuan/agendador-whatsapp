@@ -6,67 +6,73 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { supabase, BUCKET_FOTOS } from './supabase.js';
-import { conectar, desconectar, getStatus, getQr, listarGrupos, enviar } from './whatsapp.js';
+import {
+  conectar, desconectar, getStatus, getQr, listarGrupos, enviar, reconectarTodos, usuariosConectados,
+} from './whatsapp.js';
 import { iniciarAgendador, destravarEnviando, verificarPendentes, proximaData } from './agendador.js';
+import { carregarSessao, exigirLoginApi, exigirLoginPagina, rotasDeConta } from './auth.js';
 
 const PORT = process.env.PORT || 3000;
-const SENHA = process.env.PAINEL_SENHA;
-const USUARIO = process.env.PAINEL_USUARIO || 'admin';
 const raiz = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-
-if (!SENHA) {
-  console.error('Defina PAINEL_SENHA nas variáveis de ambiente (protege o painel).');
-  process.exit(1);
-}
+const pagina = (nome) => path.join(raiz, 'public', nome);
 
 const app = express();
+app.set('trust proxy', 1); // Render fica atrás de proxy: necessário pro cookie "Secure" e pro IP certo
 app.use(express.json());
 
-// ---- Rota pública pro UptimeRobot (fica fora da senha) ----
-app.get('/health', (_req, res) => res.json({ ok: true, whatsapp: getStatus().status }));
+// ---- Rota pública pro UptimeRobot ----
+app.get('/health', (_req, res) => res.json({ ok: true, conectados: usuariosConectados().length }));
 
-// ---- Daqui pra baixo tudo exige usuário/senha ----
-app.use((req, res, next) => {
-  const [tipo, valor] = (req.headers.authorization || '').split(' ');
-  if (tipo === 'Basic' && valor) {
-    const [u, ...resto] = Buffer.from(valor, 'base64').toString().split(':');
-    if (u === USUARIO && resto.join(':') === SENHA) return next();
-  }
-  res.set('WWW-Authenticate', 'Basic realm="Agendador"').status(401).send('Acesso negado');
+app.use(carregarSessao);
+
+// ---- Páginas ----
+app.get('/login', (req, res) => (req.usuario ? res.redirect('/') : res.sendFile(pagina('login.html'))));
+app.get(['/', '/index.html'], exigirLoginPagina, (_req, res) => res.sendFile(pagina('index.html')));
+
+app.get('/qr', (_req, res) => res.redirect('/?conectar=1')); // link antigo
+
+// ---- Contas (cadastro, login, logout, me) ----
+rotasDeConta(app);
+
+// ---- Daqui pra baixo, toda a API exige login ----
+app.use('/api', exigirLoginApi);
+
+// ---- WhatsApp da conta ----
+app.get('/api/status', (req, res) => res.json(getStatus(req.usuario.id)));
+
+app.get('/api/whatsapp/qr', async (req, res) => {
+  const { status, aviso } = getStatus(req.usuario.id);
+  const qr = getQr(req.usuario.id);
+  res.json({ status, aviso, qr: qr ? await QRCode.toDataURL(qr, { width: 300, margin: 1 }) : null });
 });
 
-app.use(express.static(path.join(raiz, 'public')));
-
-app.get('/qr', async (_req, res) => {
-  const { status } = getStatus();
-  const qr = getQr();
-  const corpo = status === 'conectado'
-    ? '<h2>✅ WhatsApp conectado</h2><p><a href="/">Ir pro painel</a></p>'
-    : qr
-      ? `<h2>Escaneie com o WhatsApp</h2>
-         <p>Celular → Configurações → Dispositivos conectados → Conectar dispositivo</p>
-         <img src="${await QRCode.toDataURL(qr, { width: 320 })}" alt="QR code">
-         <p><small>A página atualiza sozinha a cada 15s.</small></p>`
-      : `<h2>Aguardando QR code... (status: ${status})</h2>`;
-  res.send(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="15">
-    <title>Conectar WhatsApp</title>
-    <body style="font-family:system-ui;text-align:center;padding:40px">${corpo}</body>`);
-});
-
-app.get('/api/status', (_req, res) => res.json(getStatus()));
-
-app.get('/api/grupos', async (_req, res) => {
+app.post('/api/whatsapp/conectar', async (req, res) => {
   try {
-    res.json(await listarGrupos());
+    await conectar(req.usuario.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+app.post('/api/whatsapp/desconectar', async (req, res) => {
+  await desconectar(req.usuario.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/grupos', async (req, res) => {
+  try {
+    res.json(await listarGrupos(req.usuario.id));
   } catch (e) {
     res.status(503).json({ erro: e.message });
   }
 });
 
-app.get('/api/agendamentos', async (_req, res) => {
+app.get('/api/agendamentos', async (req, res) => {
   const { data, error } = await supabase
     .from('agendamentos')
     .select('*')
+    .eq('usuario_id', req.usuario.id)
     .order('data_hora', { ascending: false })
     .limit(200);
   if (error) return res.status(500).json({ erro: error.message });
@@ -79,10 +85,10 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, file.mimetype.startsWith('image/')),
 });
 
-async function subirFoto(arquivo) {
+async function subirFoto(usuarioId, arquivo) {
   if (!arquivo) return null;
   const ext = (arquivo.originalname.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const caminho = `${randomUUID()}.${ext || 'jpg'}`;
+  const caminho = `${usuarioId}/${randomUUID()}.${ext || 'jpg'}`;
   const { error } = await supabase.storage
     .from(BUCKET_FOTOS)
     .upload(caminho, arquivo.buffer, { contentType: arquivo.mimetype });
@@ -146,7 +152,7 @@ app.post('/api/agendamentos', upload.single('foto'), async (req, res) => {
     }
 
     // A foto sobe uma vez só e é compartilhada por todos os destinos e horários
-    const foto_path = await subirFoto(req.file);
+    const foto_path = await subirFoto(req.usuario.id, req.file);
     const lote = randomUUID(); // liga os agendamentos criados juntos (pra editar todos de uma vez)
     const linhas = destinos.flatMap((d) =>
       datas
@@ -159,6 +165,7 @@ app.post('/api/agendamentos', upload.single('foto'), async (req, res) => {
           recorrencia,
           termina_em: termina_em?.toISOString() ?? null,
           lote,
+          usuario_id: req.usuario.id,
         })),
     );
     const { data, error } = await supabase.from('agendamentos').insert(linhas).select();
@@ -179,9 +186,12 @@ async function removerFotoSeOrfa(foto) {
   if (!error && count === 0) await supabase.storage.from(BUCKET_FOTOS).remove([foto]); // na dúvida, mantém
 }
 
+// Só acha o agendamento se ele for de quem está logado
+const doUsuario = (req) => supabase.from('agendamentos').select('*').eq('id', req.params.id).eq('usuario_id', req.usuario.id);
+
 // Mostra a foto de um agendamento (o bucket é privado, então passa pelo servidor)
 app.get('/api/agendamentos/:id/foto', async (req, res) => {
-  const { data: item } = await supabase.from('agendamentos').select('foto_path').eq('id', req.params.id).maybeSingle();
+  const { data: item } = await doUsuario(req).maybeSingle();
   if (!item?.foto_path) return res.status(404).end();
   const { data, error } = await supabase.storage.from(BUCKET_FOTOS).download(item.foto_path);
   if (error) return res.status(404).end();
@@ -193,8 +203,7 @@ app.get('/api/agendamentos/:id/foto', async (req, res) => {
 // Com aplicar_lote=1, o texto e a foto mudam também nos outros agendamentos criados junto (outros grupos/horários).
 app.patch('/api/agendamentos/:id', upload.single('foto'), async (req, res) => {
   try {
-    const { data: atual, error: erroBusca } = await supabase
-      .from('agendamentos').select('*').eq('id', req.params.id).maybeSingle();
+    const { data: atual, error: erroBusca } = await doUsuario(req).maybeSingle();
     if (erroBusca) throw erroBusca;
     if (!atual) return res.status(404).json({ erro: 'Agendamento não encontrado' });
     if (['enviado', 'enviando'].includes(atual.status)) {
@@ -221,7 +230,7 @@ app.patch('/api/agendamentos/:id', upload.single('foto'), async (req, res) => {
     let foto_path = fotoAntiga;
     if (b.remover_foto === '1') foto_path = null;
     if (!mensagem && !foto_path && !req.file) return res.status(400).json({ erro: 'Precisa ter mensagem ou foto' });
-    if (req.file) foto_path = await subirFoto(req.file);
+    if (req.file) foto_path = await subirFoto(req.usuario.id, req.file);
 
     const { data, error } = await supabase
       .from('agendamentos')
@@ -242,6 +251,7 @@ app.patch('/api/agendamentos/:id', upload.single('foto'), async (req, res) => {
         .from('agendamentos')
         .update({ mensagem, foto_path })
         .eq('lote', atual.lote)
+        .eq('usuario_id', req.usuario.id)
         .neq('id', atual.id)
         .in('status', ['pendente', 'erro', 'expirado'])
         .select('id');
@@ -261,13 +271,15 @@ app.post('/api/agendamentos/:id/cancelar', async (req, res) => {
     .from('agendamentos')
     .update({ status: 'cancelado' })
     .eq('id', req.params.id)
+    .eq('usuario_id', req.usuario.id)
     .in('status', ['pendente', 'erro']);
   if (error) return res.status(500).json({ erro: error.message });
   res.json({ ok: true });
 });
 
 app.delete('/api/agendamentos/:id', async (req, res) => {
-  const { data, error } = await supabase.from('agendamentos').delete().eq('id', req.params.id).select('foto_path');
+  const { data, error } = await supabase
+    .from('agendamentos').delete().eq('id', req.params.id).eq('usuario_id', req.usuario.id).select('foto_path');
   if (error) return res.status(500).json({ erro: error.message });
   await removerFotoSeOrfa(data?.[0]?.foto_path);
   res.json({ ok: true });
@@ -281,7 +293,7 @@ app.post('/api/teste', upload.single('foto'), async (req, res) => {
     const falhas = [];
     for (const d of destinos) {
       try {
-        await enviar({ destino: d.destino, mensagem: req.body.mensagem || 'Teste do agendador ✅', foto: req.file?.buffer || null });
+        await enviar(req.usuario.id, { destino: d.destino, mensagem: req.body.mensagem || 'Teste do agendador ✅', foto: req.file?.buffer || null });
       } catch (e) {
         falhas.push(`${d.destino_nome || d.destino}: ${e.message}`);
       }
@@ -294,30 +306,26 @@ app.post('/api/teste', upload.single('foto'), async (req, res) => {
   }
 });
 
-app.post('/api/desconectar', async (_req, res) => {
-  await desconectar();
-  res.json({ ok: true });
-});
-
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ erro: err.message });
 });
 
-async function iniciarWhatsApp(tentativa = 1) {
+async function iniciarWhatsApps(tentativa = 1) {
   try {
-    await conectar();
+    const n = await reconectarTodos();
+    console.log(`${n} conta(s) com WhatsApp salvo, reconectando.`);
   } catch (e) {
     const espera = Math.min(60, 5 * tentativa);
-    console.error(`Erro ao iniciar o WhatsApp (${e.message}). Tentando de novo em ${espera}s...`);
-    setTimeout(() => iniciarWhatsApp(tentativa + 1), espera * 1000);
+    console.error(`Erro ao reconectar os WhatsApps (${e.message}). Tentando de novo em ${espera}s...`);
+    setTimeout(() => iniciarWhatsApps(tentativa + 1), espera * 1000);
   }
 }
 
 app.listen(PORT, async () => {
   console.log(`Servidor na porta ${PORT}`);
   await destravarEnviando().catch(() => {});
-  iniciarWhatsApp();
+  iniciarWhatsApps();
   iniciarAgendador();
   // assim que conectar, já manda o que venceu enquanto estava fora
   setTimeout(verificarPendentes, 20_000);

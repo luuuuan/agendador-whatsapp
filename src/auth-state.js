@@ -1,5 +1,6 @@
 // Guarda a sessão do Baileys no Supabase (tabela whatsapp_auth) em vez de arquivos,
 // porque o disco do Render free é apagado a cada restart.
+// Cada usuário tem a própria sessão: as linhas são prefixadas com "<usuario_id>:".
 import { BufferJSON, initAuthCreds, proto } from 'baileys';
 import { supabase } from './supabase.js';
 
@@ -7,12 +8,6 @@ const TABELA = 'whatsapp_auth';
 
 const serializar = (valor) => JSON.parse(JSON.stringify(valor, BufferJSON.replacer));
 const desserializar = (valor) => JSON.parse(JSON.stringify(valor), BufferJSON.reviver);
-
-async function ler(id) {
-  const { data, error } = await supabase.from(TABELA).select('data').eq('id', id).maybeSingle();
-  if (error) throw error;
-  return data ? desserializar(data.data) : null;
-}
 
 async function gravar(linhas) {
   if (!linhas.length) return;
@@ -28,13 +23,23 @@ async function apagar(ids) {
   if (error) throw error;
 }
 
-export async function apagarSessao() {
-  const { error } = await supabase.from(TABELA).delete().neq('id', '');
+export async function apagarSessao(usuarioId) {
+  const { error } = await supabase.from(TABELA).delete().like('id', `${usuarioId}:%`);
   if (error) throw error;
 }
 
-export async function useSupabaseAuthState() {
-  const creds = (await ler('creds')) || initAuthCreds();
+// Usuários que já leram o QR code alguma vez (têm credenciais salvas)
+export async function usuariosComSessao() {
+  const { data, error } = await supabase.from(TABELA).select('id').like('id', '%:creds');
+  if (error) throw error;
+  return (data || []).map((l) => l.id.split(':')[0]);
+}
+
+export async function useSupabaseAuthState(usuarioId) {
+  const pre = `${usuarioId}:`;
+  const { data: linhaCreds, error } = await supabase.from(TABELA).select('data').eq('id', `${pre}creds`).maybeSingle();
+  if (error) throw error;
+  const creds = linhaCreds ? desserializar(linhaCreds.data) : initAuthCreds();
 
   return {
     state: {
@@ -43,15 +48,13 @@ export async function useSupabaseAuthState() {
         get: async (tipo, ids) => {
           const resultado = {};
           if (!ids.length) return resultado;
-          const chaves = ids.map((id) => `${tipo}-${id}`);
-          const { data, error } = await supabase.from(TABELA).select('id, data').in('id', chaves);
-          if (error) throw error;
+          const { data, error: erro } = await supabase
+            .from(TABELA).select('id, data').in('id', ids.map((id) => `${pre}${tipo}-${id}`));
+          if (erro) throw erro;
           const mapa = new Map((data || []).map((l) => [l.id, desserializar(l.data)]));
           for (const id of ids) {
-            let valor = mapa.get(`${tipo}-${id}`) ?? null;
-            if (tipo === 'app-state-sync-key' && valor) {
-              valor = proto.Message.AppStateSyncKeyData.fromObject(valor);
-            }
+            let valor = mapa.get(`${pre}${tipo}-${id}`) ?? null;
+            if (tipo === 'app-state-sync-key' && valor) valor = proto.Message.AppStateSyncKeyData.fromObject(valor);
             resultado[id] = valor;
           }
           return resultado;
@@ -62,7 +65,7 @@ export async function useSupabaseAuthState() {
           for (const tipo in dados) {
             for (const id in dados[tipo]) {
               const valor = dados[tipo][id];
-              const chave = `${tipo}-${id}`;
+              const chave = `${pre}${tipo}-${id}`;
               if (valor) salvar.push({ id: chave, valor });
               else remover.push(chave);
             }
@@ -71,6 +74,6 @@ export async function useSupabaseAuthState() {
         },
       },
     },
-    saveCreds: () => gravar([{ id: 'creds', valor: creds }]),
+    saveCreds: () => gravar([{ id: `${pre}creds`, valor: creds }]),
   };
 }

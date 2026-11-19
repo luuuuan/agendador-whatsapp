@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { supabase, BUCKET_FOTOS } from './supabase.js';
-import { enviar, getStatus } from './whatsapp.js';
+import { enviar, usuariosConectados } from './whatsapp.js';
 
 // Se o servidor ficou fora do ar e a mensagem atrasou mais que isso, ela não é enviada
 // (vira "expirado"; nas recorrentes, pula pra próxima data). Padrão: 12 horas.
@@ -47,7 +47,7 @@ async function processar(item) {
 
   try {
     const foto = item.foto_path ? await baixarFoto(item.foto_path) : null;
-    await enviar({ destino: item.destino, mensagem: item.mensagem, foto });
+    await enviar(item.usuario_id, { destino: item.destino, mensagem: item.mensagem, foto });
     console.log(`Enviado: ${item.id} -> ${item.destino_nome || item.destino}`);
     await finalizar(item, { status: 'enviado', erro: null, enviado_em: new Date().toISOString() });
   } catch (e) {
@@ -58,7 +58,10 @@ async function processar(item) {
 
 export async function verificarPendentes() {
   if (rodando) return;
-  if (getStatus().status !== 'conectado') return; // espera conectar; quando voltar, envia o que venceu
+  // Só pega agendamentos de quem está com o WhatsApp conectado agora.
+  // Os dos outros ficam esperando: quando a pessoa reconectar, o que venceu é enviado.
+  const conectados = usuariosConectados();
+  if (!conectados.length) return;
   rodando = true;
   try {
     // "Reserva" os vencidos trocando o status pra enviando (evita envio duplicado)
@@ -66,6 +69,7 @@ export async function verificarPendentes() {
       .from('agendamentos')
       .update({ status: 'enviando' })
       .eq('status', 'pendente')
+      .in('usuario_id', conectados)
       .lte('data_hora', new Date().toISOString())
       .select('*');
     if (error) throw error;

@@ -1,8 +1,18 @@
 -- Rode este script inteiro no Supabase: SQL Editor -> New query -> Run
 
+-- 0) Contas
+create table if not exists public.usuarios (
+  id         uuid primary key default gen_random_uuid(),
+  nome       text not null,
+  email      text not null unique,
+  senha_hash text not null,
+  criado_em  timestamptz not null default now()
+);
+
 -- 1) Agendamentos
 create table if not exists public.agendamentos (
   id           uuid primary key default gen_random_uuid(),
+  usuario_id   uuid references public.usuarios (id) on delete cascade,
   destino      text not null,              -- número (ex.: 5545999999999) ou id de grupo (...@g.us)
   destino_nome text,                       -- apelido pra mostrar no painel
   mensagem     text,                       -- texto (ou legenda da foto)
@@ -12,6 +22,8 @@ create table if not exists public.agendamentos (
                check (recorrencia in ('nenhuma', 'diaria', 'semanal', 'mensal')),
   status       text not null default 'pendente'
                check (status in ('pendente', 'enviando', 'enviado', 'erro', 'cancelado', 'expirado')),
+  termina_em   timestamptz,                -- última data pra repetir (opcional)
+  lote         uuid,                       -- agendamentos criados juntos (vários grupos/horários)
   erro         text,
   enviado_em   timestamptz,
   criado_em    timestamptz not null default now(),
@@ -21,7 +33,11 @@ create table if not exists public.agendamentos (
 create index if not exists agendamentos_pendentes_idx
   on public.agendamentos (data_hora) where status = 'pendente';
 
--- 2) Sessão do WhatsApp (pra não pedir QR code de novo a cada restart do Render)
+create index if not exists agendamentos_usuario_idx on public.agendamentos (usuario_id);
+create index if not exists agendamentos_lote_idx on public.agendamentos (lote);
+
+-- 2) Sessões do WhatsApp, uma por conta (linhas com id "<usuario_id>:..."),
+--    pra não pedir QR code de novo a cada restart do Render
 create table if not exists public.whatsapp_auth (
   id         text primary key,
   data       jsonb not null,
@@ -30,8 +46,13 @@ create table if not exists public.whatsapp_auth (
 
 -- 3) Segurança: RLS ligado e SEM políticas = ninguém acessa pela chave pública (anon).
 --    O servidor usa a service_role key, que passa por cima do RLS.
+alter table public.usuarios      enable row level security;
 alter table public.agendamentos  enable row level security;
 alter table public.whatsapp_auth enable row level security;
+
+-- Permissão explícita pro servidor (projetos novos do Supabase podem não dar acesso automático)
+grant usage on schema public to service_role;
+grant all on table public.usuarios, public.agendamentos, public.whatsapp_auth to service_role;
 
 -- 4) Bucket privado pras fotos
 insert into storage.buckets (id, name, public)

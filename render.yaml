@@ -11,12 +11,10 @@ services:
         value: "22"
       - key: TZ
         value: America/Sao_Paulo
-      - key: PAINEL_USUARIO
-        value: admin
       # sync: false = o Render pede o valor na tela na hora de criar
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: PAINEL_SENHA
+      - key: CODIGO_CONVITE
         sync: false

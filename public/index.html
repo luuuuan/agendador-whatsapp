@@ -7,10 +7,11 @@
 <style>
   :root { --verde:#1f8f5f; --verde-claro:#e7f5ee; --cinza:#6b7280; --borda:#e5e7eb; --fundo:#f6f7f9; --vermelho:#c0392b; }
   * { box-sizing: border-box; }
+  [hidden] { display:none !important; }
   body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--fundo); color:#111827; }
   header { background:#fff; border-bottom:1px solid var(--borda); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   header h1 { font-size:18px; margin:0; }
-  .status { font-size:13px; padding:4px 10px; border-radius:999px; background:#fef3c7; color:#92400e; text-decoration:none; }
+  .status { font:inherit; font-size:13px; padding:4px 10px; border:0; border-radius:999px; background:#fef3c7; color:#92400e; cursor:pointer; }
   .status.ok { background:var(--verde-claro); color:var(--verde); }
   main { max-width:980px; margin:0 auto; padding:20px; display:grid; grid-template-columns: 360px 1fr; gap:20px; }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
@@ -57,6 +58,36 @@
   .ajuda { width:30px; height:30px; padding:0; border-radius:50%; background:#fff; border:1px solid var(--borda); color:var(--cinza); font-weight:600; }
   .ajuda:hover { color:var(--verde); border-color:var(--verde); }
 
+
+  /* ---------- conta ---------- */
+  .conta { position:relative; }
+  .avatar { width:32px; height:32px; padding:0; border-radius:50%; background:var(--verde); color:#fff; font-weight:600; font-size:14px; }
+  .menu-conta {
+    position:absolute; right:0; top:40px; z-index:50; min-width:220px; background:#fff; border:1px solid var(--borda);
+    border-radius:12px; padding:14px; box-shadow:0 12px 30px rgba(0,0,0,.12); display:flex; flex-direction:column; gap:2px;
+    transform-origin:top right; animation: menuAbre .18s ease-out;
+  }
+  @keyframes menuAbre { from { opacity:0; transform:scale(.95) translateY(-4px); } to { opacity:1; transform:none; } }
+  .menu-conta span { font-size:13px; color:var(--cinza); margin-bottom:10px; word-break:break-all; }
+  .menu-conta button { background:#fff; border:1px solid var(--borda); color:var(--vermelho); padding:8px; }
+
+  .aviso {
+    max-width:980px; margin:16px auto 0; padding:12px 16px; background:#fff7ed; border:1px solid #fed7aa; color:#9a3412;
+    border-radius:12px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:14px;
+    animation: avisoEntra .35s ease-out;
+  }
+  @media (max-width: 1020px) { .aviso { margin:16px 20px 0; } }
+  @keyframes avisoEntra { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+  .aviso button { background:#ea580c; color:#fff; padding:7px 12px; font-size:13px; }
+
+  /* ---------- conectar whatsapp ---------- */
+  #conexao .corpo-conexao { text-align:center; padding:6px 0 4px; min-height:200px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; }
+  #conexao .qr { width:240px; height:240px; border-radius:12px; border:1px solid var(--borda); animation: qrEntra .4s ease-out; }
+  @keyframes qrEntra { from { opacity:0; transform:scale(.94); } to { opacity:1; transform:none; } }
+  #conexao ol { text-align:left; font-size:13px; color:#374151; margin:4px 0 0; padding-left:20px; line-height:1.6; }
+  #conexao .grande { font-size:44px; line-height:1; }
+  #conexao .girando { width:34px; height:34px; border:3px solid var(--borda); border-top-color:var(--verde); border-radius:50%; animation:gira .8s linear infinite; }
+  @keyframes gira { to { transform:rotate(360deg); } }
   /* ---------- tour de boas-vindas ---------- */
   .tour-bloqueio { position:fixed; inset:0; z-index:1000; }
   .tour-luz {
@@ -131,10 +162,23 @@
 <header>
   <h1>📅 Agendador de WhatsApp</h1>
   <div class="topo-dir">
-    <a id="status" class="status" href="/qr">verificando...</a>
+    <button type="button" id="status" class="status">verificando...</button>
     <button type="button" id="btnTour" class="ajuda" title="Ver o tour de novo" aria-label="Ver o tour de novo">?</button>
+    <div class="conta">
+      <button type="button" id="btnConta" class="avatar" aria-haspopup="true" title="Minha conta">?</button>
+      <div class="menu-conta" id="menuConta" hidden>
+        <strong id="contaNome"></strong>
+        <span id="contaEmail"></span>
+        <button type="button" id="btnSair">Sair</button>
+      </div>
+    </div>
   </div>
 </header>
+
+<div class="aviso" id="aviso" hidden>
+  <span>📵 Seu WhatsApp não está conectado — as mensagens só saem com ele conectado.</span>
+  <button type="button" id="btnAvisoConectar">Conectar agora</button>
+</div>
 
 <main>
   <section class="card" id="secaoNova">
@@ -212,6 +256,17 @@
     <div id="lista"><div class="vazio">Carregando...</div></div>
   </section>
 </main>
+
+<dialog id="conexao">
+  <form method="dialog" id="formConexao">
+    <h2>Seu WhatsApp</h2>
+    <p class="sub">Cada conta envia pelo próprio número.</p>
+    <div class="corpo-conexao" id="corpoConexao"></div>
+    <div class="acoes-modal">
+      <button type="submit" class="secundario">Fechar</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="editor">
   <form id="formEditar">
@@ -338,15 +393,88 @@ $('foto').onchange = () => {
   if (f) $('preview').src = URL.createObjectURL(f);
 };
 
+// Sessão expirou em qualquer chamada -> volta pro login
+const fetchOriginal = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const r = await fetchOriginal(...args);
+  if (r.status === 401) location.replace('/login');
+  return r;
+};
+
+let statusAtual = null;
 async function carregarStatus() {
   try {
     const { status } = await (await fetch('/api/status')).json();
     const el = $('status');
-    const textos = { conectado: '● conectado', aguardando_qr: 'escanear QR code →', desconectado: 'desconectado (reconectando...)', iniciando: 'iniciando...' };
+    const textos = { conectado: '● conectado', aguardando_qr: 'escanear QR code →', desconectado: 'conectar WhatsApp', iniciando: 'conectando...' };
     el.textContent = textos[status] || status;
     el.className = 'status' + (status === 'conectado' ? ' ok' : '');
+    $('aviso').hidden = status === 'conectado' || status === 'iniciando';
+    if (status !== statusAtual && status === 'conectado') grupos = []; // recarrega os grupos do número novo
+    statusAtual = status;
+    if ($('conexao').open) desenharConexao();
   } catch { $('status').textContent = 'sem resposta'; }
 }
+
+// ----- conectar / desconectar o WhatsApp da conta -----
+let qrTimer = null;
+async function desenharConexao() {
+  const corpo = $('corpoConexao');
+  let dados;
+  try { dados = await (await fetch('/api/whatsapp/qr')).json(); } catch { return; }
+  const { status, qr, aviso } = dados;
+  const chave = status + (qr || '') + (aviso || '');
+  if (corpo.dataset.chave === chave) return; // nada mudou, não redesenha (evita piscar)
+  corpo.dataset.chave = chave;
+
+  if (status === 'conectado') {
+    corpo.innerHTML = `<div class="grande">✅</div><strong>WhatsApp conectado</strong>
+      <span style="font-size:13px;color:var(--cinza)">As mensagens agendadas saem por este número.</span>
+      <button type="button" class="mini perigo" id="btnDesconectar" style="margin-top:6px">Desconectar este número</button>`;
+    $('btnDesconectar').onclick = async () => {
+      if (!confirm('Desconectar o WhatsApp desta conta? Os agendamentos ficam salvos, mas só saem quando você conectar de novo.')) return;
+      corpo.innerHTML = '<div class="girando"></div>';
+      await fetch('/api/whatsapp/desconectar', { method: 'POST' });
+      corpo.dataset.chave = '';
+      carregarStatus();
+    };
+  } else if (status === 'aguardando_qr' && qr) {
+    corpo.innerHTML = `<img class="qr" src="${qr}" alt="QR code">
+      <ol><li>No celular, abra o WhatsApp</li><li>Vá em <b>Configurações → Dispositivos conectados</b></li>
+      <li>Toque em <b>Conectar dispositivo</b> e aponte pra este código</li></ol>`;
+  } else if (status === 'iniciando' || status === 'aguardando_qr') {
+    corpo.innerHTML = '<div class="girando"></div><span style="font-size:13px;color:var(--cinza)">Gerando o QR code...</span>';
+  } else {
+    corpo.innerHTML = `<div class="grande">📱</div><strong>Nenhum WhatsApp conectado</strong>
+      <span style="font-size:13px;color:var(--cinza)">Conecte seu número pra começar a enviar.</span>
+      ${aviso ? `<span class="msg erro" style="margin:0">${esc(aviso)}</span>` : ''}
+      <button type="button" class="primario" id="btnGerarQr" style="width:auto;padding:10px 18px">Gerar QR code</button>`;
+    $('btnGerarQr').onclick = async () => {
+      corpo.innerHTML = '<div class="girando"></div><span style="font-size:13px;color:var(--cinza)">Gerando o QR code...</span>';
+      corpo.dataset.chave = 'iniciando';
+      const r = await fetch('/api/whatsapp/conectar', { method: 'POST' });
+      if (!r.ok) { corpo.dataset.chave = ''; mostrar('Não consegui iniciar a conexão, tente de novo', 'erro'); }
+      desenharConexao();
+    };
+  }
+}
+
+function abrirConexao() {
+  $('corpoConexao').dataset.chave = '';
+  $('conexao').showModal();
+  desenharConexao();
+  clearInterval(qrTimer);
+  qrTimer = setInterval(() => { desenharConexao(); carregarStatus(); }, 3000);
+}
+$('conexao').addEventListener('close', () => clearInterval(qrTimer));
+$('status').onclick = abrirConexao;
+$('btnAvisoConectar').onclick = abrirConexao;
+
+// ----- conta -----
+let usuario = null;
+$('btnConta').onclick = (e) => { e.stopPropagation(); $('menuConta').hidden = !$('menuConta').hidden; };
+document.addEventListener('click', (e) => { if (!$('menuConta').contains(e.target)) $('menuConta').hidden = true; });
+$('btnSair').onclick = async () => { await fetch('/api/logout', { method: 'POST' }); location.replace('/login'); };
 
 const selecionados = new Set();
 
@@ -529,9 +657,9 @@ const PASSOS = [
   { emoji: '👋', titulo: 'Bem-vinda ao Agendador!',
     texto: ['Aqui você programa mensagens e fotos pro WhatsApp e elas saem sozinhas, na hora certa — pra contatos ou grupos.',
             'Vou te mostrar rapidinho como funciona. Leva menos de um minuto.'] },
-  { alvo: '#status', titulo: 'Conexão com o WhatsApp',
-    texto: ['Mostra se o seu WhatsApp está conectado. Precisa estar <b>verde</b> pras mensagens saírem.',
-            'Se pedir QR code, clique aqui e escaneie em <i>Dispositivos conectados</i> no celular.'] },
+  { alvo: '#status', titulo: 'Seu WhatsApp',
+    texto: ['Cada conta envia pelo <b>próprio número</b>. Clique aqui pra conectar o seu: aparece um QR code pra escanear em <i>Dispositivos conectados</i> no celular.',
+            'Quando ficar <b>verde</b>, está tudo pronto pras mensagens saírem.'] },
   { alvo: '#tipo', titulo: 'Pra quem enviar',
     texto: ['Escolha <b>Contato</b> e digite o número com DDD, ou <b>Grupo</b> pra marcar um ou vários grupos de uma vez.'] },
   { alvo: '#mensagem', titulo: 'A mensagem',
@@ -550,10 +678,10 @@ const PASSOS = [
             'Use <b>Alterar</b> pra mudar texto, foto ou horário, <b>Cancelar</b> pra parar e <b>Excluir</b> pra apagar.'] },
   { emoji: '🎉', titulo: 'Tudo pronto!',
     texto: ['Agora é só agendar a primeira mensagem.',
-            'Se quiser ver este tour de novo, é só clicar no <b>?</b> lá em cima.'] },
+            'Se quiser ver este tour de novo, é só clicar no <b>?</b> lá em cima. Sua conta e o botão de sair ficam na bolinha com a sua inicial.'] },
 ];
 
-const CHAVE_TOUR = 'agendador_tour_visto_v1';
+let CHAVE_TOUR = 'agendador_tour_visto_v1';
 const semAnimacao = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const tour = { i: 0, el: null, luz: null, caixa: null, alvo: null, ocupado: false };
 
@@ -693,6 +821,7 @@ function reposicionar() {
 function fecharTour() {
   if (!tour.el) return;
   marcarTourVisto();
+  if (statusAtual !== 'conectado') setTimeout(abrirConexao, semAnimacao ? 0 : 420);
   removeEventListener('keydown', teclasTour);
   removeEventListener('resize', reposicionar);
   removeEventListener('scroll', reposicionar);
@@ -705,9 +834,25 @@ function fecharTour() {
 }
 
 $('btnTour').onclick = iniciarTour;
-if (!tourJaVisto()) setTimeout(iniciarTour, 600);
+async function iniciarPainel() {
+  try {
+    usuario = await (await fetch('/api/me')).json();
+  } catch { return; }
+  $('btnConta').textContent = (usuario.nome || '?').trim().charAt(0).toUpperCase();
+  $('contaNome').textContent = usuario.nome;
+  $('contaEmail').textContent = usuario.email;
+  CHAVE_TOUR = `agendador_tour_visto_v1_${usuario.id}`; // cada conta vê o tour uma vez
+  await carregarStatus();
+  if (new URLSearchParams(location.search).has('conectar')) {
+    history.replaceState(null, '', '/');
+    abrirConexao();
+  } else if (!tourJaVisto()) {
+    setTimeout(iniciarTour, 600);
+  }
+}
+iniciarPainel();
 
-carregarStatus(); carregar();
+carregar();
 setInterval(carregarStatus, 10000);
 setInterval(carregar, 30000);
 </script>

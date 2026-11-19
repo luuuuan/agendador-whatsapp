@@ -1,0 +1,23 @@
+{
+  "name": "agendador-whatsapp",
+  "version": "1.0.0",
+  "description": "Agendador pessoal de mensagens e fotos no WhatsApp",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --env-file=.env --watch src/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.2",
+    "baileys": "7.0.0-rc14",
+    "express": "^5.3.0",
+    "multer": "^2.5.0",
+    "node-cron": "^4.6.0",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}

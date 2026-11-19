@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agendador de WhatsApp</title>
+<style>
+  :root { --verde:#1f8f5f; --verde-claro:#e7f5ee; --cinza:#6b7280; --borda:#e5e7eb; --fundo:#f6f7f9; --vermelho:#c0392b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--fundo); color:#111827; }
+  header { background:#fff; border-bottom:1px solid var(--borda); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  .status { font-size:13px; padding:4px 10px; border-radius:999px; background:#fef3c7; color:#92400e; text-decoration:none; }
+  .status.ok { background:var(--verde-claro); color:var(--verde); }
+  main { max-width:980px; margin:0 auto; padding:20px; display:grid; grid-template-columns: 360px 1fr; gap:20px; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  .card { background:#fff; border:1px solid var(--borda); border-radius:12px; padding:18px; }
+  .card h2 { font-size:15px; margin:0 0 14px; }
+  label { display:block; font-size:13px; color:var(--cinza); margin:12px 0 4px; }
+  input, select, textarea { width:100%; padding:9px 10px; border:1px solid var(--borda); border-radius:8px; font:inherit; font-size:14px; background:#fff; }
+  textarea { min-height:90px; resize:vertical; }
+  .linha { display:flex; gap:8px; }
+  .linha > * { flex:1; }
+  button { font:inherit; font-size:14px; border:0; border-radius:8px; padding:10px 14px; cursor:pointer; }
+  .primario { background:var(--verde); color:#fff; width:100%; margin-top:16px; }
+  .secundario { background:#fff; border:1px solid var(--borda); color:#111827; width:100%; margin-top:8px; }
+  .mini { padding:5px 9px; font-size:12px; background:#fff; border:1px solid var(--borda); }
+  .mini.perigo { color:var(--vermelho); }
+  #preview { max-width:100%; max-height:160px; border-radius:8px; margin-top:8px; display:none; }
+  .msg { font-size:13px; margin-top:10px; min-height:18px; }
+  .msg.erro { color:var(--vermelho); } .msg.ok { color:var(--verde); }
+  .filtros { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+  .filtros button { padding:5px 10px; font-size:12px; background:#fff; border:1px solid var(--borda); }
+  .filtros button.ativo { background:#111827; color:#fff; border-color:#111827; }
+  .item { border:1px solid var(--borda); border-radius:10px; padding:12px; margin-bottom:10px; display:flex; gap:12px; }
+  .item img { width:64px; height:64px; object-fit:cover; border-radius:8px; background:var(--fundo); }
+  .item .corpo { flex:1; min-width:0; }
+  .item .topo { display:flex; justify-content:space-between; gap:8px; font-size:13px; }
+  .item .texto { font-size:14px; margin:6px 0; white-space:pre-wrap; word-break:break-word; }
+  .item .rodape { display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:12px; color:var(--cinza); }
+  .tag { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--fundo); }
+  .tag.pendente { background:#dbeafe; color:#1e40af; } .tag.enviado { background:var(--verde-claro); color:var(--verde); }
+  .tag.erro, .tag.expirado { background:#fde2e1; color:var(--vermelho); } .tag.cancelado { color:var(--cinza); }
+  .vazio { color:var(--cinza); font-size:14px; text-align:center; padding:30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📅 Agendador de WhatsApp</h1>
+  <a id="status" class="status" href="/qr">verificando...</a>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Nova mensagem</h2>
+    <form id="form">
+      <label>Enviar para</label>
+      <select id="tipo">
+        <option value="contato">Contato (número)</option>
+        <option value="grupo">Grupo</option>
+      </select>
+
+      <div id="campoNumero">
+        <label>Número com DDD</label>
+        <input id="numero" placeholder="45 99999-9999" inputmode="tel">
+        <label>Nome (opcional, só pra você saber quem é)</label>
+        <input id="nome" placeholder="Ex.: Mãe">
+      </div>
+      <div id="campoGrupo" hidden>
+        <label>Grupo</label>
+        <select id="grupo"><option value="">Carregando grupos...</option></select>
+      </div>
+
+      <label>Mensagem (vira legenda se tiver foto)</label>
+      <textarea id="mensagem" placeholder="Escreva a mensagem..."></textarea>
+
+      <label>Foto (opcional)</label>
+      <input id="foto" type="file" accept="image/*">
+      <img id="preview" alt="">
+
+      <div class="linha">
+        <div>
+          <label>Data e hora</label>
+          <input id="dataHora" type="datetime-local" required>
+        </div>
+        <div>
+          <label>Repetir</label>
+          <select id="recorrencia">
+            <option value="nenhuma">Não repetir</option>
+            <option value="diaria">Todo dia</option>
+            <option value="semanal">Toda semana</option>
+            <option value="mensal">Todo mês</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="primario" type="submit">Agendar</button>
+      <button class="secundario" type="button" id="btnTeste">Enviar agora (teste)</button>
+      <div id="msg" class="msg"></div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Agendamentos</h2>
+    <div class="filtros" id="filtros">
+      <button data-f="pendente" class="ativo">Pendentes</button>
+      <button data-f="enviado">Enviados</button>
+      <button data-f="problema">Com problema</button>
+      <button data-f="todos">Todos</button>
+    </div>
+    <div id="lista"><div class="vazio">Carregando...</div></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let agendamentos = [];
+let filtro = 'pendente';
+let grupos = [];
+
+const rotulos = { nenhuma: '', diaria: '🔁 todo dia', semanal: '🔁 toda semana', mensal: '🔁 todo mês' };
+const fmt = (iso) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+function mostrar(texto, tipo = '') { const m = $('msg'); m.textContent = texto; m.className = 'msg ' + tipo; }
+
+// padrão: daqui a 1 hora
+(function () {
+  const d = new Date(Date.now() + 60 * 60 * 1000); d.setSeconds(0, 0);
+  $('dataHora').value = new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+})();
+
+$('tipo').onchange = () => {
+  const grupo = $('tipo').value === 'grupo';
+  $('campoGrupo').hidden = !grupo; $('campoNumero').hidden = grupo;
+  if (grupo && !grupos.length) carregarGrupos();
+};
+
+$('foto').onchange = () => {
+  const f = $('foto').files[0];
+  $('preview').style.display = f ? 'block' : 'none';
+  if (f) $('preview').src = URL.createObjectURL(f);
+};
+
+async function carregarStatus() {
+  try {
+    const { status } = await (await fetch('/api/status')).json();
+    const el = $('status');
+    const textos = { conectado: '● conectado', aguardando_qr: 'escanear QR code →', desconectado: 'desconectado (reconectando...)', iniciando: 'iniciando...' };
+    el.textContent = textos[status] || status;
+    el.className = 'status' + (status === 'conectado' ? ' ok' : '');
+  } catch { $('status').textContent = 'sem resposta'; }
+}
+
+async function carregarGrupos() {
+  const r = await fetch('/api/grupos');
+  if (!r.ok) { $('grupo').innerHTML = '<option value="">WhatsApp desconectado</option>'; return; }
+  grupos = await r.json();
+  $('grupo').innerHTML = grupos.length
+    ? grupos.map((g) => `<option value="${esc(g.id)}">${esc(g.nome)}</option>`).join('')
+    : '<option value="">Nenhum grupo</option>';
+}
+
+async function carregar() {
+  const r = await fetch('/api/agendamentos');
+  agendamentos = r.ok ? await r.json() : [];
+  renderizar();
+}
+
+function renderizar() {
+  let itens = agendamentos;
+  if (filtro === 'pendente') itens = itens.filter((a) => a.status === 'pendente' || a.status === 'enviando').reverse();
+  if (filtro === 'enviado') itens = itens.filter((a) => a.status === 'enviado');
+  if (filtro === 'problema') itens = itens.filter((a) => ['erro', 'expirado'].includes(a.status));
+  if (!itens.length) { $('lista').innerHTML = '<div class="vazio">Nada por aqui.</div>'; return; }
+
+  $('lista').innerHTML = itens.map((a) => `
+    <div class="item">
+      <div class="corpo">
+        <div class="topo"><strong>${esc(a.destino_nome || a.destino)}</strong><span class="tag ${a.status}">${a.status}</span></div>
+        <div class="texto">${esc(a.mensagem || '(só foto)')}</div>
+        <div class="rodape">
+          <span>${a.status === 'enviado' && a.enviado_em ? 'enviado ' + fmt(a.enviado_em) : fmt(a.data_hora)}</span>
+          ${a.foto_path ? '<span class="tag">🖼️ com foto</span>' : ''}
+          <span>${rotulos[a.recorrencia] || ''}</span>
+          ${a.erro ? `<span style="color:var(--vermelho)">${esc(a.erro)}</span>` : ''}
+          <span style="flex:1"></span>
+          ${['pendente', 'erro'].includes(a.status) ? `<button class="mini" onclick="cancelar('${a.id}')">Cancelar</button>` : ''}
+          <button class="mini perigo" onclick="excluir('${a.id}')">Excluir</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+$('filtros').onclick = (e) => {
+  if (!e.target.dataset.f) return;
+  filtro = e.target.dataset.f;
+  [...$('filtros').children].forEach((b) => b.classList.toggle('ativo', b === e.target));
+  renderizar();
+};
+
+function montarDados() {
+  const fd = new FormData();
+  if ($('tipo').value === 'grupo') {
+    const id = $('grupo').value;
+    if (!id) throw new Error('Escolha um grupo');
+    fd.append('destino', id);
+    fd.append('destino_nome', grupos.find((g) => g.id === id)?.nome || '');
+  } else {
+    const numero = $('numero').value.replace(/\D/g, '');
+    if (numero.length < 10) throw new Error('Número inválido (coloque o DDD)');
+    fd.append('destino', numero);
+    fd.append('destino_nome', $('nome').value);
+  }
+  fd.append('mensagem', $('mensagem').value);
+  if ($('foto').files[0]) fd.append('foto', $('foto').files[0]);
+  if (!$('mensagem').value.trim() && !$('foto').files[0]) throw new Error('Escreva uma mensagem ou escolha uma foto');
+  return fd;
+}
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const fd = montarDados();
+    const quando = new Date($('dataHora').value);
+    if (Number.isNaN(quando.getTime())) throw new Error('Data/hora inválida');
+    fd.append('data_hora', quando.toISOString());
+    fd.append('recorrencia', $('recorrencia').value);
+    mostrar('Salvando...');
+    const r = await fetch('/api/agendamentos', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.erro);
+    mostrar('Agendado para ' + fmt(j.data_hora) + ' ✅', 'ok');
+    $('mensagem').value = ''; $('foto').value = ''; $('preview').style.display = 'none';
+    carregar();
+  } catch (err) { mostrar(err.message, 'erro'); }
+};
+
+$('btnTeste').onclick = async () => {
+  try {
+    const fd = montarDados();
+    mostrar('Enviando...');
+    const r = await fetch('/api/teste', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.erro);
+    mostrar('Mensagem de teste enviada ✅', 'ok');
+  } catch (err) { mostrar(err.message, 'erro'); }
+};
+
+async function cancelar(id) {
+  await fetch(`/api/agendamentos/${id}/cancelar`, { method: 'POST' }); carregar();
+}
+async function excluir(id) {
+  if (!confirm('Excluir este agendamento?')) return;
+  await fetch(`/api/agendamentos/${id}`, { method: 'DELETE' }); carregar();
+}
+
+carregarStatus(); carregar();
+setInterval(carregarStatus, 10000);
+setInterval(carregar, 30000);
+</script>
+</body>
+</html>

@@ -51,6 +51,68 @@
   .horario { display:flex; gap:6px; margin-bottom:6px; }
   .horario button { padding:0 12px; background:#fff; border:1px solid var(--borda); color:var(--vermelho); }
   button.link { padding:0; background:none; color:var(--verde); font-size:13px; margin-top:2px; }
+
+  /* ---------- cabeçalho ---------- */
+  .topo-dir { display:flex; align-items:center; gap:10px; }
+  .ajuda { width:30px; height:30px; padding:0; border-radius:50%; background:#fff; border:1px solid var(--borda); color:var(--cinza); font-weight:600; }
+  .ajuda:hover { color:var(--verde); border-color:var(--verde); }
+
+  /* ---------- tour de boas-vindas ---------- */
+  .tour-bloqueio { position:fixed; inset:0; z-index:1000; }
+  .tour-luz {
+    position:fixed; z-index:1001; border-radius:12px; pointer-events:none;
+    box-shadow:0 0 0 9999px rgba(17,24,39,.55), 0 0 0 3px rgba(31,143,95,.9);
+    transition: top .45s cubic-bezier(.4,0,.2,1), left .45s cubic-bezier(.4,0,.2,1),
+                width .45s cubic-bezier(.4,0,.2,1), height .45s cubic-bezier(.4,0,.2,1),
+                box-shadow .3s ease, opacity .3s ease;
+  }
+  .tour-luz.centro { box-shadow:0 0 0 9999px rgba(17,24,39,.55), 0 0 0 0 rgba(31,143,95,0); }
+  .tour-luz.pulsa::after {
+    content:''; position:absolute; inset:-3px; border-radius:inherit; border:3px solid var(--verde);
+    animation: tourPulso 1.6s ease-out infinite;
+  }
+  @keyframes tourPulso { from { opacity:.9; transform:scale(1); } to { opacity:0; transform:scale(1.06); } }
+
+  .tour-caixa {
+    position:fixed; z-index:1002; width:min(340px, calc(100vw - 24px));
+    background:#fff; border-radius:14px; padding:18px 18px 14px;
+    box-shadow:0 18px 50px rgba(0,0,0,.28);
+    opacity:0; transform:translateY(10px) scale(.96);
+    transition: opacity .28s ease, transform .32s cubic-bezier(.34,1.56,.64,1);
+  }
+  .tour-caixa.visivel { opacity:1; transform:none; }
+  .tour-caixa.saindo { opacity:0; transform:translateY(-8px) scale(.97); transition: opacity .18s ease, transform .18s ease; }
+  .tour-caixa.larga { width:min(420px, calc(100vw - 24px)); text-align:center; }
+  .tour-seta {
+    position:absolute; width:14px; height:14px; background:#fff; transform:rotate(45deg);
+    transition:left .3s ease;
+  }
+  .tour-caixa[data-lado="baixo"] .tour-seta { top:-7px; }
+  .tour-caixa[data-lado="cima"] .tour-seta { bottom:-7px; }
+  .tour-caixa.larga .tour-seta { display:none; }
+  .tour-emoji { font-size:34px; line-height:1; margin-bottom:8px; }
+  .tour-caixa h3 { margin:0 0 6px; font-size:16px; }
+  .tour-caixa p { margin:0; font-size:14px; color:#374151; line-height:1.5; }
+  .tour-caixa p + p { margin-top:8px; }
+  .tour-rodape { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; }
+  .tour-pontos { display:flex; gap:5px; margin-top:14px; }
+  .tour-caixa.larga .tour-pontos { justify-content:center; }
+  .tour-pular { white-space:nowrap; }
+  .tour-pontos span { width:6px; height:6px; border-radius:99px; background:var(--borda); transition:width .3s ease, background .3s ease; }
+  .tour-pontos span.ativo { width:18px; background:var(--verde); }
+  .tour-botoes { display:flex; gap:6px; }
+  .tour-botoes button { padding:7px 12px; font-size:13px; }
+  .tour-pular { background:none; color:var(--cinza); padding-left:0 !important; }
+  .tour-voltar { background:#fff; border:1px solid var(--borda); }
+  .tour-proximo { background:var(--verde); color:#fff; }
+  .tour-caixa.larga .tour-rodape { flex-direction:column-reverse; gap:4px; }
+  .tour-caixa.larga .tour-botoes { width:100%; }
+  .tour-caixa.larga .tour-botoes button { flex:1; padding:10px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tour-luz, .tour-caixa, .tour-caixa.saindo, .tour-pontos span { transition:none; }
+    .tour-luz.pulsa::after { animation:none; }
+  }
   dialog { border:0; border-radius:12px; padding:0; width:min(440px, 94vw); box-shadow:0 20px 50px rgba(0,0,0,.25); }
   dialog::backdrop { background:rgba(17,24,39,.45); }
   dialog form { padding:18px; max-height:88vh; overflow-y:auto; }
@@ -68,11 +130,14 @@
 <body>
 <header>
   <h1>📅 Agendador de WhatsApp</h1>
-  <a id="status" class="status" href="/qr">verificando...</a>
+  <div class="topo-dir">
+    <a id="status" class="status" href="/qr">verificando...</a>
+    <button type="button" id="btnTour" class="ajuda" title="Ver o tour de novo" aria-label="Ver o tour de novo">?</button>
+  </div>
 </header>
 
 <main>
-  <section class="card">
+  <section class="card" id="secaoNova">
     <h2>Nova mensagem</h2>
     <form id="form">
       <label>Enviar para</label>
@@ -130,13 +195,13 @@
         <input id="fim" type="date">
       </div>
 
-      <button class="primario" type="submit">Agendar</button>
+      <button class="primario" type="submit" id="btnAgendar">Agendar</button>
       <button class="secundario" type="button" id="btnTeste">Enviar agora (teste)</button>
       <div id="msg" class="msg"></div>
     </form>
   </section>
 
-  <section class="card">
+  <section class="card" id="secaoLista">
     <h2>Agendamentos</h2>
     <div class="filtros" id="filtros">
       <button data-f="pendente" class="ativo">Pendentes</button>
@@ -458,6 +523,189 @@ $('formEditar').onsubmit = async (e) => {
     carregar();
   } catch (err) { msg.textContent = err.message; msg.className = 'msg erro'; }
 };
+
+// ================= TOUR DE BOAS-VINDAS =================
+const PASSOS = [
+  { emoji: '👋', titulo: 'Bem-vinda ao Agendador!',
+    texto: ['Aqui você programa mensagens e fotos pro WhatsApp e elas saem sozinhas, na hora certa — pra contatos ou grupos.',
+            'Vou te mostrar rapidinho como funciona. Leva menos de um minuto.'] },
+  { alvo: '#status', titulo: 'Conexão com o WhatsApp',
+    texto: ['Mostra se o seu WhatsApp está conectado. Precisa estar <b>verde</b> pras mensagens saírem.',
+            'Se pedir QR code, clique aqui e escaneie em <i>Dispositivos conectados</i> no celular.'] },
+  { alvo: '#tipo', titulo: 'Pra quem enviar',
+    texto: ['Escolha <b>Contato</b> e digite o número com DDD, ou <b>Grupo</b> pra marcar um ou vários grupos de uma vez.'] },
+  { alvo: '#mensagem', titulo: 'A mensagem',
+    texto: ['Escreva o texto aqui. Se você anexar uma foto, esse texto vai como legenda dela.'] },
+  { alvo: '#foto', titulo: 'Foto (opcional)',
+    texto: ['Dá pra mandar só texto, só foto, ou os dois juntos.'] },
+  { alvo: '#recorrencia', titulo: 'Repetir',
+    texto: ['Envio único, ou repetir <b>todo dia</b>, <b>toda semana</b> ou <b>todo mês</b>.',
+            'No “todo dia” você escolhe quando começa e pode colocar vários horários por dia.'] },
+  { alvo: '#btnAgendar', titulo: 'Agendar',
+    texto: ['Salva o agendamento. A partir daí é com o sistema — pode fechar a página que a mensagem sai no horário.'] },
+  { alvo: '#btnTeste', titulo: 'Testar antes',
+    texto: ['Manda a mensagem <b>na hora</b>, sem agendar. Bom pra conferir se o texto e a foto ficaram do jeito que você quer.'] },
+  { alvo: '#secaoLista', titulo: 'Seus agendamentos',
+    texto: ['Tudo que está programado aparece aqui, com o status de cada um.',
+            'Use <b>Alterar</b> pra mudar texto, foto ou horário, <b>Cancelar</b> pra parar e <b>Excluir</b> pra apagar.'] },
+  { emoji: '🎉', titulo: 'Tudo pronto!',
+    texto: ['Agora é só agendar a primeira mensagem.',
+            'Se quiser ver este tour de novo, é só clicar no <b>?</b> lá em cima.'] },
+];
+
+const CHAVE_TOUR = 'agendador_tour_visto_v1';
+const semAnimacao = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const tour = { i: 0, el: null, luz: null, caixa: null, alvo: null, ocupado: false };
+
+function tourJaVisto() { try { return localStorage.getItem(CHAVE_TOUR) === '1'; } catch { return false; } }
+function marcarTourVisto() { try { localStorage.setItem(CHAVE_TOUR, '1'); } catch { /* sem storage: mostra de novo na próxima, sem problema */ } }
+
+function iniciarTour() {
+  if (tour.el) return;
+  if ($('editor').open) $('editor').close();
+  tour.i = 0;
+  tour.el = document.createElement('div');
+  tour.el.innerHTML = `
+    <div class="tour-bloqueio"></div>
+    <div class="tour-luz centro"></div>
+    <div class="tour-caixa" role="dialog" aria-modal="true" aria-live="polite">
+      <div class="tour-seta"></div>
+      <div class="tour-conteudo"></div>
+      <div class="tour-pontos">${PASSOS.map(() => '<span></span>').join('')}</div>
+      <div class="tour-rodape">
+        <button type="button" class="tour-pular">Pular tour</button>
+        <div class="tour-botoes">
+          <button type="button" class="tour-voltar">Voltar</button>
+          <button type="button" class="tour-proximo">Próximo</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(tour.el);
+  tour.luz = tour.el.querySelector('.tour-luz');
+  tour.caixa = tour.el.querySelector('.tour-caixa');
+  // a luz começa no centro, pequena, e "abre" até o primeiro alvo
+  Object.assign(tour.luz.style, { top: innerHeight / 2 + 'px', left: innerWidth / 2 + 'px', width: '0px', height: '0px' });
+
+  tour.el.querySelector('.tour-pular').onclick = () => fecharTour();
+  tour.el.querySelector('.tour-voltar').onclick = () => irPara(tour.i - 1);
+  tour.el.querySelector('.tour-proximo').onclick = () => (tour.i === PASSOS.length - 1 ? fecharTour() : irPara(tour.i + 1));
+  tour.el.querySelector('.tour-bloqueio').onclick = () => tour.caixa.animate(
+    [{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }],
+    { duration: 260 });
+  addEventListener('keydown', teclasTour);
+  addEventListener('resize', reposicionar);
+  addEventListener('scroll', reposicionar, { passive: true });
+  mostrarPasso(0, true);
+}
+
+function teclasTour(e) {
+  if (e.key === 'Escape') fecharTour();
+  else if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); tour.el.querySelector('.tour-proximo').click(); }
+  else if (e.key === 'ArrowLeft' && tour.i > 0) irPara(tour.i - 1);
+}
+
+function irPara(i) {
+  if (tour.ocupado || i < 0 || i >= PASSOS.length) return;
+  tour.ocupado = true;
+  tour.caixa.classList.remove('visivel');
+  tour.caixa.classList.add('saindo');
+  setTimeout(() => mostrarPasso(i), semAnimacao ? 0 : 180);
+}
+
+function mostrarPasso(i, primeiro = false) {
+  tour.i = i;
+  const p = PASSOS[i];
+  tour.alvo = p.alvo ? document.querySelector(p.alvo) : null;
+  if (tour.alvo && tour.alvo.offsetParent === null) tour.alvo = tour.alvo.closest('.card') || null; // alvo escondido
+
+  tour.el.querySelector('.tour-conteudo').innerHTML =
+    (p.emoji ? `<div class="tour-emoji">${p.emoji}</div>` : '') +
+    `<h3>${p.titulo}</h3>` + p.texto.map((t) => `<p>${t}</p>`).join('');
+  tour.el.querySelectorAll('.tour-pontos span').forEach((s, n) => s.classList.toggle('ativo', n === i));
+  tour.el.querySelector('.tour-voltar').hidden = i === 0;
+  tour.el.querySelector('.tour-pular').hidden = i === PASSOS.length - 1;
+  tour.el.querySelector('.tour-proximo').textContent =
+    i === 0 ? 'Começar' : i === PASSOS.length - 1 ? 'Concluir' : 'Próximo';
+  tour.caixa.classList.toggle('larga', !tour.alvo);
+
+  const exibir = () => {
+    reposicionar();
+    tour.caixa.classList.remove('saindo');
+    requestAnimationFrame(() => {
+      tour.caixa.classList.add('visivel');
+      tour.ocupado = false;
+      tour.el.querySelector('.tour-proximo').focus({ preventScroll: true });
+    });
+  };
+
+  if (tour.alvo) {
+    const r = tour.alvo.getBoundingClientRect();
+    const foraDaTela = r.top < 70 || r.bottom > innerHeight - 20;
+    if (foraDaTela) {
+      tour.alvo.scrollIntoView({ block: 'center', behavior: semAnimacao ? 'auto' : 'smooth' });
+      setTimeout(exibir, semAnimacao ? 0 : 380);
+      return;
+    }
+  }
+  primeiro ? requestAnimationFrame(exibir) : exibir();
+}
+
+function reposicionar() {
+  if (!tour.el) return;
+  const margem = 8;
+  const caixa = tour.caixa;
+
+  if (!tour.alvo) {
+    // passo sem alvo: luz fecha no centro e a caixa fica no meio da tela
+    tour.luz.classList.add('centro');
+    tour.luz.classList.remove('pulsa');
+    Object.assign(tour.luz.style, { top: innerHeight / 2 + 'px', left: innerWidth / 2 + 'px', width: '0px', height: '0px' });
+    caixa.removeAttribute('data-lado');
+    caixa.style.left = Math.max(12, (innerWidth - caixa.offsetWidth) / 2) + 'px';
+    caixa.style.top = Math.max(12, (innerHeight - caixa.offsetHeight) / 2) + 'px';
+    return;
+  }
+
+  const r = tour.alvo.getBoundingClientRect();
+  tour.luz.classList.remove('centro');
+  tour.luz.classList.add('pulsa');
+  Object.assign(tour.luz.style, {
+    top: r.top - margem + 'px', left: r.left - margem + 'px',
+    width: r.width + margem * 2 + 'px', height: r.height + margem * 2 + 'px',
+  });
+
+  const largura = caixa.offsetWidth;
+  const altura = caixa.offsetHeight;
+  const espacoBaixo = innerHeight - r.bottom;
+  const lado = espacoBaixo > altura + 30 || espacoBaixo > r.top ? 'baixo' : 'cima';
+  let top = lado === 'baixo' ? r.bottom + margem + 14 : r.top - margem - 14 - altura;
+  top = Math.min(Math.max(12, top), innerHeight - altura - 12);
+  let left = r.left + r.width / 2 - largura / 2;
+  left = Math.min(Math.max(12, left), innerWidth - largura - 12);
+
+  caixa.dataset.lado = lado;
+  caixa.style.top = top + 'px';
+  caixa.style.left = left + 'px';
+  const centroAlvo = r.left + r.width / 2 - left;
+  caixa.querySelector('.tour-seta').style.left = Math.min(Math.max(16, centroAlvo - 7), largura - 30) + 'px';
+}
+
+function fecharTour() {
+  if (!tour.el) return;
+  marcarTourVisto();
+  removeEventListener('keydown', teclasTour);
+  removeEventListener('resize', reposicionar);
+  removeEventListener('scroll', reposicionar);
+  const el = tour.el;
+  tour.el = null;
+  tour.caixa.classList.remove('visivel');
+  tour.caixa.classList.add('saindo');
+  tour.luz.style.opacity = '0';
+  setTimeout(() => el.remove(), semAnimacao ? 0 : 300);
+}
+
+$('btnTour').onclick = iniciarTour;
+if (!tourJaVisto()) setTimeout(iniciarTour, 600);
 
 carregarStatus(); carregar();
 setInterval(carregarStatus, 10000);

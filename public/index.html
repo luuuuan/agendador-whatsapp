@@ -41,6 +41,13 @@
   .tag { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--fundo); }
   .tag.pendente { background:#dbeafe; color:#1e40af; } .tag.enviado { background:var(--verde-claro); color:var(--verde); }
   .tag.erro, .tag.expirado { background:#fde2e1; color:var(--vermelho); } .tag.cancelado { color:var(--cinza); }
+  .grupos-box { border:1px solid var(--borda); border-radius:8px; max-height:220px; overflow-y:auto; margin-top:6px; }
+  .grupos-box label { display:flex; align-items:center; gap:8px; margin:0; padding:8px 10px; color:#111827; font-size:14px; cursor:pointer; border-bottom:1px solid var(--borda); }
+  .grupos-box label:last-child { border-bottom:0; }
+  .grupos-box label:hover { background:var(--fundo); }
+  .grupos-box input { width:auto; margin:0; }
+  .grupos-acoes { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--cinza); margin-top:6px; }
+  .grupos-acoes button { padding:0; background:none; color:var(--verde); font-size:12px; }
   .vazio { color:var(--cinza); font-size:14px; text-align:center; padding:30px 0; }
 </style>
 </head>
@@ -67,8 +74,13 @@
         <input id="nome" placeholder="Ex.: Mãe">
       </div>
       <div id="campoGrupo" hidden>
-        <label>Grupo</label>
-        <select id="grupo"><option value="">Carregando grupos...</option></select>
+        <label>Grupos (pode marcar vários)</label>
+        <input id="buscaGrupo" placeholder="Buscar grupo...">
+        <div id="listaGrupos" class="grupos-box"><div class="vazio">Carregando grupos...</div></div>
+        <div class="grupos-acoes">
+          <span id="contGrupos">0 selecionados</span>
+          <button type="button" id="limparGrupos">limpar seleção</button>
+        </div>
       </div>
 
       <label>Mensagem (vira legenda se tiver foto)</label>
@@ -152,14 +164,31 @@ async function carregarStatus() {
   } catch { $('status').textContent = 'sem resposta'; }
 }
 
+const selecionados = new Set();
+
 async function carregarGrupos() {
   const r = await fetch('/api/grupos');
-  if (!r.ok) { $('grupo').innerHTML = '<option value="">WhatsApp desconectado</option>'; return; }
+  if (!r.ok) { $('listaGrupos').innerHTML = '<div class="vazio">WhatsApp desconectado</div>'; return; }
   grupos = await r.json();
-  $('grupo').innerHTML = grupos.length
-    ? grupos.map((g) => `<option value="${esc(g.id)}">${esc(g.nome)}</option>`).join('')
-    : '<option value="">Nenhum grupo</option>';
+  renderizarGrupos();
 }
+
+function renderizarGrupos() {
+  const busca = $('buscaGrupo').value.trim().toLowerCase();
+  const visiveis = grupos.filter((g) => g.nome.toLowerCase().includes(busca));
+  $('listaGrupos').innerHTML = visiveis.length
+    ? visiveis.map((g) => `<label><input type="checkbox" value="${esc(g.id)}" ${selecionados.has(g.id) ? 'checked' : ''}> ${esc(g.nome)}</label>`).join('')
+    : '<div class="vazio">Nenhum grupo encontrado</div>';
+  $('contGrupos').textContent = `${selecionados.size} selecionado${selecionados.size === 1 ? '' : 's'}`;
+}
+
+$('listaGrupos').onchange = (e) => {
+  if (e.target.type !== 'checkbox') return;
+  e.target.checked ? selecionados.add(e.target.value) : selecionados.delete(e.target.value);
+  $('contGrupos').textContent = `${selecionados.size} selecionado${selecionados.size === 1 ? '' : 's'}`;
+};
+$('buscaGrupo').oninput = renderizarGrupos;
+$('limparGrupos').onclick = () => { selecionados.clear(); renderizarGrupos(); };
 
 async function carregar() {
   const r = await fetch('/api/agendamentos');
@@ -202,10 +231,9 @@ $('filtros').onclick = (e) => {
 function montarDados() {
   const fd = new FormData();
   if ($('tipo').value === 'grupo') {
-    const id = $('grupo').value;
-    if (!id) throw new Error('Escolha um grupo');
-    fd.append('destino', id);
-    fd.append('destino_nome', grupos.find((g) => g.id === id)?.nome || '');
+    if (!selecionados.size) throw new Error('Marque pelo menos um grupo');
+    const lista = [...selecionados].map((id) => ({ id, nome: grupos.find((g) => g.id === id)?.nome || '' }));
+    fd.append('destinos', JSON.stringify(lista));
   } else {
     const numero = $('numero').value.replace(/\D/g, '');
     if (numero.length < 10) throw new Error('Número inválido (coloque o DDD)');
@@ -230,7 +258,7 @@ $('form').onsubmit = async (e) => {
     const r = await fetch('/api/agendamentos', { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.erro);
-    mostrar('Agendado para ' + fmt(j.data_hora) + ' ✅', 'ok');
+    mostrar(`${j.length > 1 ? j.length + ' mensagens agendadas' : 'Agendado'} para ${fmt(j[0].data_hora)} ✅`, 'ok');
     $('mensagem').value = ''; $('foto').value = ''; $('preview').style.display = 'none';
     carregar();
   } catch (err) { mostrar(err.message, 'erro'); }
@@ -239,11 +267,11 @@ $('form').onsubmit = async (e) => {
 $('btnTeste').onclick = async () => {
   try {
     const fd = montarDados();
-    mostrar('Enviando...');
+    mostrar('Enviando... (pode levar alguns segundos com vários grupos)');
     const r = await fetch('/api/teste', { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.erro);
-    mostrar('Mensagem de teste enviada ✅', 'ok');
+    mostrar(j.enviados > 1 ? `Enviado para ${j.enviados} grupos ✅` : 'Mensagem de teste enviada ✅', 'ok');
   } catch (err) { mostrar(err.message, 'erro'); }
 };
 

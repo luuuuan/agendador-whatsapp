@@ -89,26 +89,36 @@ async function subirFoto(arquivo) {
   return caminho;
 }
 
+// Aceita um destino só (destino + destino_nome) ou vários (destinos = JSON [{id, nome}])
+function lerDestinos(body) {
+  if (body.destinos) {
+    let lista;
+    try { lista = JSON.parse(body.destinos); } catch { throw new Error('Lista de destinos inválida'); }
+    return (Array.isArray(lista) ? lista : [])
+      .filter((d) => d?.id)
+      .map((d) => ({ destino: String(d.id).trim(), destino_nome: d.nome?.trim() || null }));
+  }
+  return body.destino ? [{ destino: body.destino.trim(), destino_nome: body.destino_nome?.trim() || null }] : [];
+}
+
 app.post('/api/agendamentos', upload.single('foto'), async (req, res) => {
   try {
-    const { destino, destino_nome, mensagem, data_hora, recorrencia = 'nenhuma' } = req.body;
-    if (!destino) return res.status(400).json({ erro: 'Informe o destino' });
+    const { mensagem, data_hora, recorrencia = 'nenhuma' } = req.body;
+    const destinos = lerDestinos(req.body);
+    if (!destinos.length) return res.status(400).json({ erro: 'Escolha pelo menos um destino' });
     if (!data_hora || Number.isNaN(Date.parse(data_hora))) return res.status(400).json({ erro: 'Data/hora inválida' });
     if (!mensagem?.trim() && !req.file) return res.status(400).json({ erro: 'Escreva uma mensagem ou anexe uma foto' });
 
+    // A foto sobe uma vez só e é compartilhada por todos os destinos
     const foto_path = await subirFoto(req.file);
-    const { data, error } = await supabase
-      .from('agendamentos')
-      .insert({
-        destino: destino.trim(),
-        destino_nome: destino_nome?.trim() || null,
-        mensagem: mensagem?.trim() || null,
-        foto_path,
-        data_hora: new Date(data_hora).toISOString(),
-        recorrencia,
-      })
-      .select()
-      .single();
+    const linhas = destinos.map((d) => ({
+      ...d,
+      mensagem: mensagem?.trim() || null,
+      foto_path,
+      data_hora: new Date(data_hora).toISOString(),
+      recorrencia,
+    }));
+    const { data, error } = await supabase.from('agendamentos').insert(linhas).select();
     if (error) throw error;
     res.status(201).json(data);
   } catch (e) {
@@ -130,17 +140,33 @@ app.delete('/api/agendamentos/:id', async (req, res) => {
   const { data, error } = await supabase.from('agendamentos').delete().eq('id', req.params.id).select('foto_path');
   if (error) return res.status(500).json({ erro: error.message });
   const foto = data?.[0]?.foto_path;
-  if (foto) await supabase.storage.from(BUCKET_FOTOS).remove([foto]);
+  if (foto) {
+    // Só apaga a foto se nenhum outro agendamento (de outro grupo) ainda usa ela
+    const { count } = await supabase
+      .from('agendamentos')
+      .select('id', { count: 'exact', head: true })
+      .eq('foto_path', foto);
+    if (!count) await supabase.storage.from(BUCKET_FOTOS).remove([foto]);
+  }
   res.json({ ok: true });
 });
 
-// Envia uma mensagem de teste na hora (sem agendar)
+// Envia na hora (sem agendar), pra um ou vários destinos
 app.post('/api/teste', upload.single('foto'), async (req, res) => {
   try {
-    const { destino, mensagem } = req.body;
-    if (!destino) return res.status(400).json({ erro: 'Informe o destino' });
-    await enviar({ destino, mensagem: mensagem || 'Teste do agendador ✅', foto: req.file?.buffer || null });
-    res.json({ ok: true });
+    const destinos = lerDestinos(req.body);
+    if (!destinos.length) return res.status(400).json({ erro: 'Escolha pelo menos um destino' });
+    const falhas = [];
+    for (const d of destinos) {
+      try {
+        await enviar({ destino: d.destino, mensagem: req.body.mensagem || 'Teste do agendador ✅', foto: req.file?.buffer || null });
+      } catch (e) {
+        falhas.push(`${d.destino_nome || d.destino}: ${e.message}`);
+      }
+      if (destinos.length > 1) await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (falhas.length) return res.status(500).json({ erro: falhas.join(' | ') });
+    res.json({ ok: true, enviados: destinos.length });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }

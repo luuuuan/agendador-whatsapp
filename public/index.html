@@ -51,6 +51,17 @@
   .horario { display:flex; gap:6px; margin-bottom:6px; }
   .horario button { padding:0 12px; background:#fff; border:1px solid var(--borda); color:var(--vermelho); }
   button.link { padding:0; background:none; color:var(--verde); font-size:13px; margin-top:2px; }
+  dialog { border:0; border-radius:12px; padding:0; width:min(440px, 94vw); box-shadow:0 20px 50px rgba(0,0,0,.25); }
+  dialog::backdrop { background:rgba(17,24,39,.45); }
+  dialog form { padding:18px; max-height:88vh; overflow-y:auto; }
+  dialog h2 { font-size:16px; margin:0 0 4px; }
+  dialog .sub { font-size:13px; color:var(--cinza); margin:0 0 6px; }
+  .foto-atual { display:flex; align-items:center; gap:10px; margin-top:6px; }
+  .foto-atual img { width:72px; height:72px; object-fit:cover; border-radius:8px; border:1px solid var(--borda); }
+  .check { display:flex; gap:8px; align-items:flex-start; color:#111827; font-size:13px; margin-top:12px; }
+  .check input { width:auto; margin-top:2px; }
+  .acoes-modal { display:flex; gap:8px; margin-top:16px; }
+  .acoes-modal button { flex:1; margin:0; }
   .vazio { color:var(--cinza); font-size:14px; text-align:center; padding:30px 0; }
 </style>
 </head>
@@ -136,6 +147,55 @@
     <div id="lista"><div class="vazio">Carregando...</div></div>
   </section>
 </main>
+
+<dialog id="editor">
+  <form id="formEditar">
+    <h2>Alterar agendamento</h2>
+    <p class="sub" id="edDestino"></p>
+
+    <label>Mensagem</label>
+    <textarea id="edMensagem"></textarea>
+
+    <label>Foto</label>
+    <div class="foto-atual" id="edFotoAtual" hidden>
+      <img id="edFotoImg" alt="Foto atual">
+      <label class="check" style="margin:0"><input type="checkbox" id="edRemoverFoto"> remover foto</label>
+    </div>
+    <input id="edFoto" type="file" accept="image/*" style="margin-top:6px">
+    <small style="color:var(--cinza)">Escolha uma imagem só se quiser trocar a foto.</small>
+
+    <div class="linha">
+      <div>
+        <label>Próximo envio</label>
+        <input id="edDataHora" type="datetime-local" required>
+      </div>
+      <div>
+        <label>Repetir</label>
+        <select id="edRecorrencia">
+          <option value="nenhuma">Não repetir</option>
+          <option value="diaria">Todo dia</option>
+          <option value="semanal">Toda semana</option>
+          <option value="mensal">Todo mês</option>
+        </select>
+      </div>
+    </div>
+    <div id="edBlocoFim">
+      <label>Termina em (opcional)</label>
+      <input id="edFim" type="date">
+    </div>
+
+    <label class="check" id="edLoteBox" hidden>
+      <input type="checkbox" id="edLote" checked>
+      <span id="edLoteTexto"></span>
+    </label>
+
+    <div class="acoes-modal">
+      <button type="button" class="secundario" id="edCancelar">Fechar</button>
+      <button type="submit" class="primario">Salvar</button>
+    </div>
+    <div id="edMsg" class="msg"></div>
+  </form>
+</dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -273,6 +333,7 @@ function renderizar() {
           <span>${rotulos[a.recorrencia] || ''}${a.termina_em ? ' até ' + new Date(a.termina_em).toLocaleDateString('pt-BR') : ''}</span>
           ${a.erro ? `<span style="color:var(--vermelho)">${esc(a.erro)}</span>` : ''}
           <span style="flex:1"></span>
+          ${['pendente', 'erro', 'expirado', 'cancelado'].includes(a.status) ? `<button class="mini" onclick="abrirEditor('${a.id}')">Alterar</button>` : ''}
           ${['pendente', 'erro'].includes(a.status) ? `<button class="mini" onclick="cancelar('${a.id}')">Cancelar</button>` : ''}
           <button class="mini perigo" onclick="excluir('${a.id}')">Excluir</button>
         </div>
@@ -342,6 +403,61 @@ async function excluir(id) {
   if (!confirm('Excluir este agendamento?')) return;
   await fetch(`/api/agendamentos/${id}`, { method: 'DELETE' }); carregar();
 }
+
+// ----- editar -----
+let editando = null;
+const editaveis = ['pendente', 'erro', 'expirado'];
+
+function abrirEditor(id) {
+  const a = agendamentos.find((x) => x.id === id);
+  if (!a) return;
+  editando = a;
+  $('edDestino').textContent = 'Para: ' + (a.destino_nome || a.destino) + (a.status === 'cancelado' ? ' — salvar reativa o envio' : '');
+  $('edMensagem').value = a.mensagem || '';
+  $('edDataHora').value = local(new Date(a.data_hora)).slice(0, 16);
+  $('edRecorrencia').value = a.recorrencia;
+  $('edFim').value = a.termina_em ? local(new Date(a.termina_em)).slice(0, 10) : '';
+  $('edBlocoFim').hidden = a.recorrencia === 'nenhuma';
+  $('edFoto').value = '';
+  $('edRemoverFoto').checked = false;
+  $('edFotoAtual').hidden = !a.foto_path;
+  if (a.foto_path) $('edFotoImg').src = `/api/agendamentos/${a.id}/foto?v=${encodeURIComponent(a.foto_path)}`;
+
+  const irmaos = a.lote ? agendamentos.filter((x) => x.lote === a.lote && x.id !== a.id && editaveis.includes(x.status)).length : 0;
+  $('edLoteBox').hidden = !irmaos;
+  $('edLote').checked = true;
+  $('edLoteTexto').textContent = `Alterar o texto e a foto também nos outros ${irmaos} agendamento${irmaos > 1 ? 's' : ''} criado${irmaos > 1 ? 's' : ''} junto (outros grupos/horários). Data e repetição mudam só neste.`;
+  $('edMsg').textContent = '';
+  $('editor').showModal();
+}
+
+$('edRecorrencia').onchange = () => { $('edBlocoFim').hidden = $('edRecorrencia').value === 'nenhuma'; };
+$('edCancelar').onclick = () => $('editor').close();
+
+$('formEditar').onsubmit = async (e) => {
+  e.preventDefault();
+  const msg = $('edMsg');
+  try {
+    const quando = new Date($('edDataHora').value);
+    if (Number.isNaN(quando.getTime())) throw new Error('Data/hora inválida');
+    const fd = new FormData();
+    fd.append('mensagem', $('edMensagem').value);
+    fd.append('data_hora', quando.toISOString());
+    fd.append('recorrencia', $('edRecorrencia').value);
+    fd.append('termina_em', $('edRecorrencia').value !== 'nenhuma' && $('edFim').value ? new Date(`${$('edFim').value}T23:59:59`).toISOString() : '');
+    if ($('edRemoverFoto').checked) fd.append('remover_foto', '1');
+    if ($('edFoto').files[0]) fd.append('foto', $('edFoto').files[0]);
+    if (!$('edLoteBox').hidden && $('edLote').checked) fd.append('aplicar_lote', '1');
+
+    msg.textContent = 'Salvando...'; msg.className = 'msg';
+    const r = await fetch(`/api/agendamentos/${editando.id}`, { method: 'PATCH', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.erro);
+    $('editor').close();
+    mostrar(j.outros_atualizados ? `Alterado (e mais ${j.outros_atualizados}) ✅` : 'Agendamento alterado ✅', 'ok');
+    carregar();
+  } catch (err) { msg.textContent = err.message; msg.className = 'msg erro'; }
+};
 
 carregarStatus(); carregar();
 setInterval(carregarStatus, 10000);

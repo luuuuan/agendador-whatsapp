@@ -147,6 +147,7 @@ app.post('/api/agendamentos', upload.single('foto'), async (req, res) => {
 
     // A foto sobe uma vez só e é compartilhada por todos os destinos e horários
     const foto_path = await subirFoto(req.file);
+    const lote = randomUUID(); // liga os agendamentos criados juntos (pra editar todos de uma vez)
     const linhas = destinos.flatMap((d) =>
       datas
         .filter((data) => !termina_em || data <= termina_em)
@@ -157,11 +158,99 @@ app.post('/api/agendamentos', upload.single('foto'), async (req, res) => {
           data_hora: data.toISOString(),
           recorrencia,
           termina_em: termina_em?.toISOString() ?? null,
+          lote,
         })),
     );
     const { data, error } = await supabase.from('agendamentos').insert(linhas).select();
     if (error) throw error;
     res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// Só apaga a foto do Storage se nenhum agendamento ainda usa ela (a foto é compartilhada entre grupos/horários)
+async function removerFotoSeOrfa(foto) {
+  if (!foto) return;
+  const { count, error } = await supabase
+    .from('agendamentos')
+    .select('id', { count: 'exact', head: true })
+    .eq('foto_path', foto);
+  if (!error && count === 0) await supabase.storage.from(BUCKET_FOTOS).remove([foto]); // na dúvida, mantém
+}
+
+// Mostra a foto de um agendamento (o bucket é privado, então passa pelo servidor)
+app.get('/api/agendamentos/:id/foto', async (req, res) => {
+  const { data: item } = await supabase.from('agendamentos').select('foto_path').eq('id', req.params.id).maybeSingle();
+  if (!item?.foto_path) return res.status(404).end();
+  const { data, error } = await supabase.storage.from(BUCKET_FOTOS).download(item.foto_path);
+  if (error) return res.status(404).end();
+  res.type(data.type || 'image/jpeg').set('Cache-Control', 'private, max-age=300');
+  res.send(Buffer.from(await data.arrayBuffer()));
+});
+
+// Editar: texto, foto, data do próximo envio, repetição e término.
+// Com aplicar_lote=1, o texto e a foto mudam também nos outros agendamentos criados junto (outros grupos/horários).
+app.patch('/api/agendamentos/:id', upload.single('foto'), async (req, res) => {
+  try {
+    const { data: atual, error: erroBusca } = await supabase
+      .from('agendamentos').select('*').eq('id', req.params.id).maybeSingle();
+    if (erroBusca) throw erroBusca;
+    if (!atual) return res.status(404).json({ erro: 'Agendamento não encontrado' });
+    if (['enviado', 'enviando'].includes(atual.status)) {
+      return res.status(409).json({ erro: 'Essa mensagem já foi enviada, não dá mais pra alterar' });
+    }
+
+    const b = req.body;
+    const recorrencia = b.recorrencia ?? atual.recorrencia;
+    if (!RECORRENCIAS.includes(recorrencia)) return res.status(400).json({ erro: 'Repetição inválida' });
+    const mensagem = b.mensagem !== undefined ? b.mensagem.trim() || null : atual.mensagem;
+
+    let data_hora = b.data_hora ? new Date(b.data_hora) : new Date(atual.data_hora);
+    if (Number.isNaN(data_hora.getTime())) return res.status(400).json({ erro: 'Data/hora inválida' });
+    const agora = new Date(Date.now() - 60_000);
+    if (recorrencia !== 'nenhuma' && data_hora < agora) data_hora = proximaData(data_hora, recorrencia, agora);
+
+    let termina_em = atual.termina_em ? new Date(atual.termina_em) : null;
+    if (b.termina_em !== undefined) termina_em = b.termina_em ? new Date(b.termina_em) : null;
+    if (recorrencia === 'nenhuma') termina_em = null;
+    if (termina_em && Number.isNaN(termina_em.getTime())) return res.status(400).json({ erro: 'Data de término inválida' });
+    if (termina_em && data_hora > termina_em) return res.status(400).json({ erro: 'A data de término é antes do próximo envio' });
+
+    const fotoAntiga = atual.foto_path;
+    let foto_path = fotoAntiga;
+    if (b.remover_foto === '1') foto_path = null;
+    if (!mensagem && !foto_path && !req.file) return res.status(400).json({ erro: 'Precisa ter mensagem ou foto' });
+    if (req.file) foto_path = await subirFoto(req.file);
+
+    const { data, error } = await supabase
+      .from('agendamentos')
+      .update({
+        mensagem, foto_path, recorrencia,
+        data_hora: data_hora.toISOString(),
+        termina_em: termina_em?.toISOString() ?? null,
+        status: 'pendente', erro: null,
+      })
+      .eq('id', atual.id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    let outros = 0;
+    if (b.aplicar_lote === '1' && atual.lote) {
+      const { data: atualizados, error: erroLote } = await supabase
+        .from('agendamentos')
+        .update({ mensagem, foto_path })
+        .eq('lote', atual.lote)
+        .neq('id', atual.id)
+        .in('status', ['pendente', 'erro', 'expirado'])
+        .select('id');
+      if (erroLote) throw erroLote;
+      outros = atualizados?.length || 0;
+    }
+
+    if (fotoAntiga && fotoAntiga !== foto_path) await removerFotoSeOrfa(fotoAntiga);
+    res.json({ ...data, outros_atualizados: outros });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }
@@ -180,15 +269,7 @@ app.post('/api/agendamentos/:id/cancelar', async (req, res) => {
 app.delete('/api/agendamentos/:id', async (req, res) => {
   const { data, error } = await supabase.from('agendamentos').delete().eq('id', req.params.id).select('foto_path');
   if (error) return res.status(500).json({ erro: error.message });
-  const foto = data?.[0]?.foto_path;
-  if (foto) {
-    // Só apaga a foto se nenhum outro agendamento (de outro grupo) ainda usa ela
-    const { count } = await supabase
-      .from('agendamentos')
-      .select('id', { count: 'exact', head: true })
-      .eq('foto_path', foto);
-    if (!count) await supabase.storage.from(BUCKET_FOTOS).remove([foto]);
-  }
+  await removerFotoSeOrfa(data?.[0]?.foto_path);
   res.json({ ok: true });
 });
 

@@ -27,7 +27,8 @@ async function baixarFoto(path) {
 
 async function finalizar(item, campos) {
   const agora = new Date();
-  const proxima = proximaData(item.data_hora, item.recorrencia, agora);
+  let proxima = proximaData(item.data_hora, item.recorrencia, agora);
+  if (proxima && item.termina_em && proxima > new Date(item.termina_em)) proxima = null; // chegou na data final
   const atualizacao = proxima
     ? { ...campos, status: 'pendente', data_hora: proxima.toISOString() } // recorrente: volta pra fila
     : campos;

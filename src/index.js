@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { supabase, BUCKET_FOTOS } from './supabase.js';
 import { conectar, desconectar, getStatus, getQr, listarGrupos, enviar } from './whatsapp.js';
-import { iniciarAgendador, destravarEnviando, verificarPendentes } from './agendador.js';
+import { iniciarAgendador, destravarEnviando, verificarPendentes, proximaData } from './agendador.js';
 
 const PORT = process.env.PORT || 3000;
 const SENHA = process.env.PAINEL_SENHA;
@@ -102,23 +102,63 @@ function lerDestinos(body) {
   return body.destino ? [{ destino: body.destino.trim(), destino_nome: body.destino_nome?.trim() || null }] : [];
 }
 
+const RECORRENCIAS = ['nenhuma', 'diaria', 'semanal', 'mensal'];
+
+// Datas do primeiro envio: "datas" = JSON com várias (um horário cada, no envio diário) ou "data_hora" = uma só
+function lerDatas(body) {
+  let lista = [];
+  if (body.datas) {
+    try { lista = JSON.parse(body.datas); } catch { throw new Error('Lista de horários inválida'); }
+  } else if (body.data_hora) {
+    lista = [body.data_hora];
+  }
+  if (!Array.isArray(lista) || !lista.length) throw new Error('Informe a data e o horário');
+  const datas = lista.map((d) => new Date(d));
+  if (datas.some((d) => Number.isNaN(d.getTime()))) throw new Error('Data/hora inválida');
+  return [...new Set(datas.map((d) => d.toISOString()))].map((iso) => new Date(iso)); // tira horários repetidos
+}
+
 app.post('/api/agendamentos', upload.single('foto'), async (req, res) => {
   try {
-    const { mensagem, data_hora, recorrencia = 'nenhuma' } = req.body;
+    const { mensagem, recorrencia = 'nenhuma' } = req.body;
+    if (!RECORRENCIAS.includes(recorrencia)) return res.status(400).json({ erro: 'Repetição inválida' });
     const destinos = lerDestinos(req.body);
     if (!destinos.length) return res.status(400).json({ erro: 'Escolha pelo menos um destino' });
-    if (!data_hora || Number.isNaN(Date.parse(data_hora))) return res.status(400).json({ erro: 'Data/hora inválida' });
     if (!mensagem?.trim() && !req.file) return res.status(400).json({ erro: 'Escreva uma mensagem ou anexe uma foto' });
 
-    // A foto sobe uma vez só e é compartilhada por todos os destinos
+    let datas;
+    try { datas = lerDatas(req.body); } catch (e) { return res.status(400).json({ erro: e.message }); }
+
+    let termina_em = null;
+    if (req.body.termina_em) {
+      termina_em = new Date(req.body.termina_em);
+      if (Number.isNaN(termina_em.getTime())) return res.status(400).json({ erro: 'Data de término inválida' });
+    }
+
+    // Repetição com o primeiro horário já passado (ex.: começa hoje às 8h e agora são 14h):
+    // pula pra próxima vez, em vez de mandar atrasado na hora
+    const agora = new Date(Date.now() - 60_000);
+    if (recorrencia !== 'nenhuma') {
+      datas = datas.map((d) => (d < agora ? proximaData(d, recorrencia, agora) : d));
+    }
+    if (termina_em && datas.every((d) => d > termina_em)) {
+      return res.status(400).json({ erro: 'A data de término é antes do primeiro envio' });
+    }
+
+    // A foto sobe uma vez só e é compartilhada por todos os destinos e horários
     const foto_path = await subirFoto(req.file);
-    const linhas = destinos.map((d) => ({
-      ...d,
-      mensagem: mensagem?.trim() || null,
-      foto_path,
-      data_hora: new Date(data_hora).toISOString(),
-      recorrencia,
-    }));
+    const linhas = destinos.flatMap((d) =>
+      datas
+        .filter((data) => !termina_em || data <= termina_em)
+        .map((data) => ({
+          ...d,
+          mensagem: mensagem?.trim() || null,
+          foto_path,
+          data_hora: data.toISOString(),
+          recorrencia,
+          termina_em: termina_em?.toISOString() ?? null,
+        })),
+    );
     const { data, error } = await supabase.from('agendamentos').insert(linhas).select();
     if (error) throw error;
     res.status(201).json(data);

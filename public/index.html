@@ -48,6 +48,9 @@
   .grupos-box input { width:auto; margin:0; }
   .grupos-acoes { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--cinza); margin-top:6px; }
   .grupos-acoes button { padding:0; background:none; color:var(--verde); font-size:12px; }
+  .horario { display:flex; gap:6px; margin-bottom:6px; }
+  .horario button { padding:0 12px; background:#fff; border:1px solid var(--borda); color:var(--vermelho); }
+  button.link { padding:0; background:none; color:var(--verde); font-size:13px; margin-top:2px; }
   .vazio { color:var(--cinza); font-size:14px; text-align:center; padding:30px 0; }
 </style>
 </head>
@@ -90,20 +93,30 @@
       <input id="foto" type="file" accept="image/*">
       <img id="preview" alt="">
 
-      <div class="linha">
-        <div>
-          <label>Data e hora</label>
-          <input id="dataHora" type="datetime-local" required>
-        </div>
-        <div>
-          <label>Repetir</label>
-          <select id="recorrencia">
-            <option value="nenhuma">Não repetir</option>
-            <option value="diaria">Todo dia</option>
-            <option value="semanal">Toda semana</option>
-            <option value="mensal">Todo mês</option>
-          </select>
-        </div>
+      <label>Repetir</label>
+      <select id="recorrencia">
+        <option value="nenhuma">Não repetir</option>
+        <option value="diaria">Todo dia</option>
+        <option value="semanal">Toda semana</option>
+        <option value="mensal">Todo mês</option>
+      </select>
+
+      <div id="blocoUnico">
+        <label id="rotuloDataHora">Data e hora</label>
+        <input id="dataHora" type="datetime-local">
+      </div>
+
+      <div id="blocoDiario" hidden>
+        <label>Começa em</label>
+        <input id="inicio" type="date">
+        <label>Horários (envia em todos, todo dia)</label>
+        <div id="horarios"></div>
+        <button type="button" class="link" id="addHorario">+ adicionar horário</button>
+      </div>
+
+      <div id="blocoFim" hidden>
+        <label>Termina em (opcional — vazio = repete pra sempre)</label>
+        <input id="fim" type="date">
       </div>
 
       <button class="primario" type="submit">Agendar</button>
@@ -136,11 +149,57 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<'
 
 function mostrar(texto, tipo = '') { const m = $('msg'); m.textContent = texto; m.className = 'msg ' + tipo; }
 
-// padrão: daqui a 1 hora
-(function () {
+// ----- datas e horários -----
+const local = (d) => new Date(d - d.getTimezoneOffset() * 60000).toISOString(); // "AAAA-MM-DDTHH:MM" no fuso do navegador
+
+function padraoDatas() {
   const d = new Date(Date.now() + 60 * 60 * 1000); d.setSeconds(0, 0);
-  $('dataHora').value = new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-})();
+  $('dataHora').value = local(d).slice(0, 16);
+  $('inicio').value = local(new Date()).slice(0, 10);
+  $('fim').value = '';
+  $('horarios').innerHTML = '';
+  adicionarHorario('08:00');
+}
+
+function adicionarHorario(valor = '') {
+  const linha = document.createElement('div');
+  linha.className = 'horario';
+  linha.innerHTML = '<input type="time" required><button type="button" title="Remover">×</button>';
+  linha.querySelector('input').value = valor;
+  linha.querySelector('button').onclick = () => {
+    if ($('horarios').children.length > 1) linha.remove();
+  };
+  $('horarios').appendChild(linha);
+}
+$('addHorario').onclick = () => adicionarHorario();
+
+$('recorrencia').onchange = () => {
+  const r = $('recorrencia').value;
+  $('blocoDiario').hidden = r !== 'diaria';
+  $('blocoUnico').hidden = r === 'diaria';
+  $('blocoFim').hidden = r === 'nenhuma';
+  $('rotuloDataHora').textContent = r === 'nenhuma' ? 'Data e hora' : 'Primeiro envio';
+};
+padraoDatas();
+
+// Monta a lista de datas do primeiro envio (uma por horário no diário) + término
+function lerDatas() {
+  const r = $('recorrencia').value;
+  let datas;
+  if (r === 'diaria') {
+    if (!$('inicio').value) throw new Error('Escolha a data de início');
+    const horas = [...$('horarios').querySelectorAll('input')].map((i) => i.value).filter(Boolean);
+    if (!horas.length) throw new Error('Coloque pelo menos um horário');
+    datas = [...new Set(horas)].sort().map((h) => new Date(`${$('inicio').value}T${h}`));
+  } else {
+    if (!$('dataHora').value) throw new Error('Escolha a data e a hora');
+    datas = [new Date($('dataHora').value)];
+  }
+  if (datas.some((d) => Number.isNaN(d.getTime()))) throw new Error('Data/hora inválida');
+  const fim = r !== 'nenhuma' && $('fim').value ? new Date(`${$('fim').value}T23:59:59`) : null;
+  if (fim && datas.every((d) => d > fim)) throw new Error('A data de término é antes do início');
+  return { datas, fim };
+}
 
 $('tipo').onchange = () => {
   const grupo = $('tipo').value === 'grupo';
@@ -209,9 +268,9 @@ function renderizar() {
         <div class="topo"><strong>${esc(a.destino_nome || a.destino)}</strong><span class="tag ${a.status}">${a.status}</span></div>
         <div class="texto">${esc(a.mensagem || '(só foto)')}</div>
         <div class="rodape">
-          <span>${a.status === 'enviado' && a.enviado_em ? 'enviado ' + fmt(a.enviado_em) : fmt(a.data_hora)}</span>
+          <span>${a.status === 'enviado' && a.enviado_em ? 'enviado ' + fmt(a.enviado_em) : (a.recorrencia !== 'nenhuma' ? 'próximo: ' : '') + fmt(a.data_hora)}</span>
           ${a.foto_path ? '<span class="tag">🖼️ com foto</span>' : ''}
-          <span>${rotulos[a.recorrencia] || ''}</span>
+          <span>${rotulos[a.recorrencia] || ''}${a.termina_em ? ' até ' + new Date(a.termina_em).toLocaleDateString('pt-BR') : ''}</span>
           ${a.erro ? `<span style="color:var(--vermelho)">${esc(a.erro)}</span>` : ''}
           <span style="flex:1"></span>
           ${['pendente', 'erro'].includes(a.status) ? `<button class="mini" onclick="cancelar('${a.id}')">Cancelar</button>` : ''}
@@ -250,15 +309,16 @@ $('form').onsubmit = async (e) => {
   e.preventDefault();
   try {
     const fd = montarDados();
-    const quando = new Date($('dataHora').value);
-    if (Number.isNaN(quando.getTime())) throw new Error('Data/hora inválida');
-    fd.append('data_hora', quando.toISOString());
+    const { datas, fim } = lerDatas();
+    fd.append('datas', JSON.stringify(datas.map((d) => d.toISOString())));
+    if (fim) fd.append('termina_em', fim.toISOString());
     fd.append('recorrencia', $('recorrencia').value);
     mostrar('Salvando...');
     const r = await fetch('/api/agendamentos', { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.erro);
-    mostrar(`${j.length > 1 ? j.length + ' mensagens agendadas' : 'Agendado'} para ${fmt(j[0].data_hora)} ✅`, 'ok');
+    const primeiro = j.map((a) => a.data_hora).sort()[0];
+    mostrar(`${j.length > 1 ? j.length + ' agendamentos criados' : 'Agendado'} — primeiro envio ${fmt(primeiro)} ✅`, 'ok');
     $('mensagem').value = ''; $('foto').value = ''; $('preview').style.display = 'none';
     carregar();
   } catch (err) { mostrar(err.message, 'erro'); }
